@@ -145,6 +145,7 @@ class NOTEARS(StructureEstimator):
         rho_max=1e16,
         w_threshold=0.3,
         c=0.25,
+        show_progress=True,
     ):
         """
         Solve min_W L(W; X) + lambda1 ‖W‖_1 s.t. h(W) = 0 using augmented Lagrangian.
@@ -194,6 +195,11 @@ class NOTEARS(StructureEstimator):
         if c <= 0 or c >= 1:
             raise ValueError("c (progress rate) must be in the range (0, 1). Aborting")
 
+        if show_progress and config.SHOW_PROGRESS:
+            iteration = trange(int(max_iter))
+        else:
+            iteration = range(int(max_iter))
+
         n = self.data.shape[1]
         nodes = self.data.columns.to_list()
         X = self.data.to_numpy()
@@ -216,7 +222,6 @@ class NOTEARS(StructureEstimator):
             X = X - np.mean(X, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
-        iteration = trange(int(max_iter))
         for _ in iteration:
             w_new, h_new = None, None
 
