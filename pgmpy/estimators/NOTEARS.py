@@ -2,6 +2,7 @@ import numpy as np
 import scipy.linalg as slin
 import scipy.optimize as sopt
 from scipy.special import expit as sigmoid
+from tqdm.auto import trange
 
 from pgmpy import config
 from pgmpy.base import DAG
@@ -30,14 +31,28 @@ class NOTEARS(StructureEstimator):
     Information Processing Systems (NIPS'18). Curran Associates Inc., Red Hook, NY, USA, 9492–9503.
     """
 
-    def __init__(self, data, use_cache=True, **kwargs):
-        self.use_cache = use_cache
-
+    def __init__(self, data, **kwargs):
         super(NOTEARS, self).__init__(data=data, **kwargs)
 
-    def _loss_function(self, loss_type, X, W):
+    def _loss_grad(self, loss_type, X, W):
         """
         Calculate the value of the loss function and its gradient.
+
+        Parameters
+        ----------
+        X: numpy.ndarray
+            The data used for DAG estimation.
+
+        W: numpy.ndarray
+            The weighted matrix for the DAG.
+
+        Returns
+        -------
+        loss: float
+            The value of the loss function for given data.
+
+        G_loss: numpy.ndarray
+            The gradient of the loss function for given data.
         """
         M = X @ W
         if loss_type == "l2":
@@ -59,32 +74,63 @@ class NOTEARS(StructureEstimator):
 
         return loss, G_loss
 
-    def _constraint_grad(self, W, d):
+    def _constraint_grad(self, W, n):
         """
         Calculate the value of the acyclicity constraint and its gradient.
 
         The acyclicity constraint is given by  -
             h(W) = trace(exp(W*W)) - d
-                where W is the weighted matrix and d is the number of nodes in graph
+                where W is the weighted matrix and d is the number of nodes in graph.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        h: float
+            The value of the constraint function for given parameters.
+
+        g_h: numpy.ndarray
+            The gradient of the objective function for given parameters.
         """
         E = slin.expm(W * W)
-        h = np.trace(E) - d
+        h = np.trace(E) - n
         G_h = E.T * W * 2
         return h, G_h
 
-    def _adj(self, w, d):
+    def _adj(self, w, n):
         """
         Convert doubled array ([2 d^2] array) back to original variables ([d, d] matrix).
-        """
-        return (w[: d * d] - w[d * d :]).reshape([d, d])
 
-    def _objective_function(self, w, alpha, rho, lambda1, d, loss_type, X):
+        Parameters
+        ----------
+
+        Returns
+        -------
+        w: numpy.ndarray
+            The weighted matrix in original dimensions (n*n)
+        """
+        return (w[: n * n] - w[n * n :]).reshape([n, n])
+
+    def _objective_function(self, w, alpha, rho, lambda1, n, loss_type, X):
         """
         Evaluate value and gradient of augmented Lagrangian for doubled variables ([2 d^2] array).
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        obj: float
+            The value of the objective function for given parameters.
+
+        g_obj: numpy.ndarray
+            The gradient of the objective function for given parameters.
         """
-        W = self._adj(w, d)
-        loss, G_loss = self._loss_function(loss_type, X, W)
-        h, G_h = self._constraint_grad(W, d)
+        W = self._adj(w, n)
+        loss, G_loss = self._loss_grad(loss_type, X, W)
+        h, G_h = self._constraint_grad(W, n)
+
         obj = loss + 0.5 * rho * h * h + alpha * h + lambda1 * w.sum()
         G_smooth = G_loss + (rho * h + alpha) * G_h
         g_obj = np.concatenate((G_smooth + lambda1, -G_smooth + lambda1), axis=None)
@@ -94,16 +140,18 @@ class NOTEARS(StructureEstimator):
         self,
         lambda1,
         loss_type="l2",
-        max_iter=100,
+        max_iter=20,
         h_tol=1e-8,
         rho_max=1e16,
         w_threshold=0.3,
+        c=0.25,
     ):
-        """Solve min_W L(W; X) + lambda1 ‖W‖_1 s.t. h(W) = 0 using augmented Lagrangian.
+        """
+        Solve min_W L(W; X) + lambda1 ‖W‖_1 s.t. h(W) = 0 using augmented Lagrangian.
 
         The objective function, consisiting of the sum of a loss function and the L1 norm,
         is minimised using the augmented Lagrangian method. The resulting weighted matrix
-        is the Structural Equation Model corresponding to the data. The weighted matrix is
+        is the Structural Equation Model corresponding to the data. The weighted matrix W is
         converted to a DAG object and returned.
 
         Parameters
@@ -126,6 +174,9 @@ class NOTEARS(StructureEstimator):
         w_threshold: float
             drop edge if |weight| < w_threshold
 
+        c: float
+            progress rate in the range (0, 1)
+
         Returns
         -------
         Estimated model: pgmpy.base.DAG
@@ -134,10 +185,20 @@ class NOTEARS(StructureEstimator):
         Examples
         --------
         """
-        # num_samples = self.data.shape[0]
+
+        # Step 0: Initial checks and setup
+        if loss_type not in ("l2", "logistic", "poisson"):
+            raise ValueError(
+                f"loss_type must be one of: l2, logistic, or poisson. Got: {loss_type}"
+            )
+        if c <= 0 or c >= 1:
+            raise ValueError("c (progress rate) must be in the range (0, 1). Aborting")
+
         n = self.data.shape[1]
         nodes = self.data.columns.to_list()
         X = self.data.to_numpy()
+
+        # Step 1: Initialize starting guesses
         w_est, rho, alpha, h = (
             np.zeros(2 * n * n),
             1.0,
@@ -154,8 +215,12 @@ class NOTEARS(StructureEstimator):
         if loss_type == "l2":
             X = X - np.mean(X, axis=0, keepdims=True)
 
-        for _ in range(max_iter):
+        # Step 2: Iterate until max_iter iterations
+        iteration = trange(int(max_iter))
+        for _ in iteration:
             w_new, h_new = None, None
+
+            # Step 2.(a): Solve for new values of W and h
             while rho < rho_max:
                 sol = sopt.minimize(
                     self._objective_function,
@@ -167,15 +232,20 @@ class NOTEARS(StructureEstimator):
                 )
                 w_new = sol.x
                 h_new, _ = self._constraint_grad(self._adj(w_new, n), n)
-                if h_new > 0.25 * h:
+                if h_new > c * h:
                     rho *= 10
                 else:
                     break
+
+            # Step 2.(b): Update alpha
             w_est, h = w_new, h_new
             alpha += rho * h
+
+            # Step 2.(c): Break away if h converges to 0
             if h <= h_tol or rho >= rho_max:
                 break
 
+        # Step 3: Apply threshold to final weighted matrix
         W_est = self._adj(w_est, n)
         W_est[np.abs(W_est) < w_threshold] = 0
 
