@@ -5,6 +5,7 @@ import pandas as pd
 
 from pgmpy.estimators import NOTEARS
 from pgmpy.models import BayesianNetwork
+from pgmpy.utils import get_example_model
 
 
 class TestNoTEARS(unittest.TestCase):
@@ -23,13 +24,9 @@ class TestNoTEARS(unittest.TestCase):
             [(u, v) for u in self.model1.nodes() for v in self.model1.nodes()]
         )
 
-        # link to dataset: "https://www.kaggle.com/c/titanic/download/train.csv"
-        self.titanic_data = pd.read_csv(
-            "pgmpy/tests/test_estimators/testdata/titanic_train.csv"
-        )
-
-        self.titanic_data1 = self.titanic_data[["Survived", "Sex", "Pclass"]]
-        self.est_titanic1 = NOTEARS(self.titanic_data1)
+        self.ecoli_data = get_example_model("ecoli70").simulate(int(3e4), seed=42)
+        self.ecoli_edges = set(get_example_model("ecoli70").edges())
+        self.est_ecoli = NOTEARS(self.ecoli_data)
 
     def test_estimate_rand(self):
         dag_rand_data = self.est_rand_data.estimate(lambda1=0.01, show_progress=False)
@@ -37,22 +34,11 @@ class TestNoTEARS(unittest.TestCase):
             set(dag_rand_data.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
         )
 
-    def test_estimate_titanic(self):
-        """
-        est_edges = self.est_titanic2.estimate(
-             show_progress=False
+    def test_estimate_ecoli(self):
+        est_edges = self.est_ecoli.estimate(
+            lambda1=0.5, max_iter=50, h_tol=1e-6, c=0.5, show_progress=False
         ).edges()
-        self.assertTrue(
-            est_edges
-            <= set(
-                [
-                    ("Sex", "Survived"),
-                    ("Sex", "Pclass"),
-                    ("Pclass", "Sex"),
-                    ("Pclass", "Survived"),
-                ]
-            )
-        )"""
+        self.assertTrue(len(set(est_edges) - self.ecoli_edges) <= 10)
 
     def tearDown(self):
         del self.rand_data
