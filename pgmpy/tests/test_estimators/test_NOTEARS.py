@@ -44,6 +44,6 @@ class TestNoTEARS(unittest.TestCase):
         del self.rand_data
         del self.est_rand_data
         del self.model1
-        del self.titanic_data
-        del self.titanic_data1
-        del self.est_titanic1
+        del self.ecoli_data
+        del self.ecoli_edges
+        del self.est_ecoli
