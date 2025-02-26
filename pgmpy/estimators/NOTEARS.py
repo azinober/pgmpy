@@ -6,7 +6,7 @@ from tqdm.auto import trange
 
 from pgmpy import config
 from pgmpy.base import DAG
-from pgmpy.estimators import StructureEstimator
+from pgmpy.estimators import ExpertKnowledge, StructureEstimator
 from pgmpy.global_vars import logger
 
 
@@ -145,6 +145,7 @@ class NOTEARS(StructureEstimator):
         rho_max=1e16,
         w_threshold=0.3,
         c=0.25,
+        expert_knowledge=None,
         show_progress=True,
     ):
         """
@@ -200,6 +201,9 @@ class NOTEARS(StructureEstimator):
         else:
             iteration = range(int(max_iter))
 
+        if expert_knowledge is None:
+            expert_knowledge = ExpertKnowledge()
+
         n = self.data.shape[1]
         nodes = self.data.columns.to_list()
         X = self.data.to_numpy()
@@ -211,6 +215,13 @@ class NOTEARS(StructureEstimator):
             0.0,
             np.inf,
         )  # double w_est into (w_pos, w_neg)
+
+        expert_mask = np.ones(2 * n * n)
+        for u, v in expert_knowledge.forbidden_edges:
+            i = nodes.index(u)
+            j = nodes.index(v)
+            expert_mask[i * n + j] = 0
+            expert_mask[(i + n) * n + j] = 0
 
         bounds = [
             (0, 0) if i == j else (0, None)
@@ -244,6 +255,7 @@ class NOTEARS(StructureEstimator):
 
             # Step 2.(b): Update alpha
             w_est, h = w_new, h_new
+            w_est = w_est * expert_mask
             alpha += rho * h
 
             # Step 2.(c): Break away if h converges to 0

@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from pgmpy.estimators import NOTEARS
+from pgmpy.estimators import NOTEARS, ExpertKnowledge
 from pgmpy.models import BayesianNetwork
 from pgmpy.utils import get_example_model
 
@@ -32,6 +32,19 @@ class TestNoTEARS(unittest.TestCase):
         dag_rand_data = self.est_rand_data.estimate(lambda1=0.01, show_progress=False)
         self.assertSetEqual(
             set(dag_rand_data.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
+        )
+
+    def test_estimate_expert(self):
+        self.rand_data["E"] = self.rand_data["D"] + self.rand_data["B"]
+        expert_knowledge = ExpertKnowledge(forbidden_edges=[("D", "E")])
+        dag_rand_data = NOTEARS(self.rand_data).estimate(
+            lambda1=0.1, expert_knowledge=expert_knowledge, show_progress=False
+        )
+        self.assertSetEqual(
+            set(dag_rand_data.edges()),
+            set(
+                [("A", "D"), ("A", "C"), ("B", "C"), ("B", "E")]
+            ),  # Does not contain ("D","E")
         )
 
     def test_estimate_ecoli(self):
