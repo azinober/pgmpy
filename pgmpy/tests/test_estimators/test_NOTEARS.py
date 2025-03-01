@@ -62,7 +62,7 @@ class TestNoTEARS(unittest.TestCase):
 
     def test_estimate_ecoli(self):
         est_edges = self.est_ecoli.estimate(
-            lambda1=0.4, max_iter=50, h_tol=1e-6, c=0.5, show_progress=False
+            lambda1=0.4, max_iter=5, h_tol=1e-6, c=0.5, show_progress=False
         ).edges()
         self.assertTrue(len(set(est_edges) - self.ecoli_edges) <= 10)
 

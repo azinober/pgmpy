@@ -131,9 +131,12 @@ class NOTEARS(StructureEstimator):
         grad: numpy.ndarray
             The gradient of the objective function for given parameters.
         """
-        loss = np.sum(np.abs(W) * forbidden_mask)
-        grad = forbidden_mask * np.sign(W)
-        return loss, grad
+        # Given a mask M, and adjacency matrix W, the penalty is given by $ \sum_{i,j} M_{ij} W_{ij}^2 $.
+        # The Jacobian is given by $ J_{ij} = 2 * W_{ij} M_{ij} M_{ij} = 2 * W_{ij} * M_{ij} $.
+
+        penalty = np.sum((np.abs(W) * forbidden_mask) ** 2)
+        jac = 2 * W * forbidden_mask
+        return penalty, jac
 
     def _fixed_penalty_gradient(self, W, fixed_mask, alpha, w_threshold):
         """
@@ -150,27 +153,21 @@ class NOTEARS(StructureEstimator):
         grad: numpy.ndarray
             The gradient of the objective function for given parameters.
         """
-        fixed_W = W * fixed_mask
+        # Given a mask M, and adjacency matrix W, we define W^t = W if W < w_threshold else 0.
+        # The penalty matrix is: $ P_{ij} e^{-(w_t - W^t_{ij} * M_{ij})^{- \alpha}} $
+        # The penalty is $ \sum_{ij} P_{ij} $.
+        # The Jacobian is $ J_{ij} = -\alpha M_{ij} P_{ij} (w_t -  W_{ij} M_{ij})^{- \alpha - 1} $.
 
-        vectorized_func = np.vectorize(
-            lambda x: (
-                math.exp(-1 / ((w_threshold - x) ** (1 / alpha)))
-                if x > w_threshold
-                else 0
-            )
-        )
-        loss = np.sum(vectorized_func(fixed_W))
-
-        vectorized_grad = np.vectorize(
-            lambda x: (
-                math.exp(-1 / ((w_threshold - x) ** (1 / alpha)))
-                / (alpha * ((w_threshold - x) ** (1 + (1 / alpha))))
-                if x > w_threshold
-                else 0
-            )
+        W_thres = np.where(W < w_threshold, W, 0)
+        penalty_mat = np.exp(-(((w_threshold - W_thres) * fixed_mask) ** (-alpha)))
+        jac = (
+            -alpha
+            * fixed_mask
+            * penalty_mat
+            * (w_threshold - W_thres * fixed_mask) ** (-alpha - 1)
         )
 
-        return loss, vectorized_grad(fixed_W)
+        return np.sum(penalty_mat), jac
 
     def _objective_function(
         self,
@@ -206,13 +203,12 @@ class NOTEARS(StructureEstimator):
         loss, G_loss = self._loss_grad(loss_type, df, adjacency_matrix_est)
         h, G_h = self._constraint_grad(adjacency_matrix_est, n)
 
-        forb_penalty, forb_penalty_gradient = self._forbidden_penalty_gradient(
+        forb_penalty, forb_jac = self._forbidden_penalty_gradient(
             adjacency_matrix_est, forbidden_mask
         )
-        fixed_penalty, fixed_penalty_gradient = self._fixed_penalty_gradient(
+        fixed_penalty, fixed_jac = self._fixed_penalty_gradient(
             adjacency_matrix_est, fixed_mask, alpha_2, w_threshold
         )
-
         obj = (
             loss
             + 0.5 * rho * h * h
@@ -222,13 +218,17 @@ class NOTEARS(StructureEstimator):
             + lambda3 * fixed_penalty
         )
         G_smooth = (
-            G_loss
-            + (rho * h + alpha) * G_h
-            + lambda2 * forb_penalty_gradient
-            + lambda3 * fixed_penalty_gradient
+            G_loss + (rho * h + alpha) * G_h + lambda2 * forb_jac + lambda3 * fixed_jac
         )
+
         # print(G_smooth, lambda1)
-        g_obj = np.concatenate((G_smooth + lambda1, -G_smooth + lambda1), axis=None)
+        g_obj = np.concatenate(
+            (
+                G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+                -G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+            ),
+            axis=None,
+        )
         return obj, g_obj
 
     def estimate(
@@ -238,9 +238,9 @@ class NOTEARS(StructureEstimator):
         max_iter=20,
         h_tol=1e-8,
         rho_max=1e16,
-        w_threshold=0.3,
+        w_threshold=0.1,
         c=0.25,
-        alpha_2=0.1,
+        alpha_2=1,
         expert_knowledge=None,
         show_progress=True,
     ):
@@ -302,6 +302,9 @@ class NOTEARS(StructureEstimator):
 
         n = self.data.shape[1]
         nodes = self.data.columns.to_list()
+
+        # TODO: For utilizing the torch backend we would need to define all the np. functions using backend.
+        # TODO: This needs to be changed to also work with pytorch tensors
         df = self.data.to_numpy()
 
         # Step 1: Initialize starting estimates
@@ -311,7 +314,7 @@ class NOTEARS(StructureEstimator):
             0.0,
             np.inf,
         )  # double w_est into (w_pos, w_neg)
-        lambda2, lambda3 = 0.1, 0.01
+        lambda2, lambda3 = 1, 1
 
         forbidden_mask = np.zeros(shape=(n, n))
         for u, v in expert_knowledge.forbidden_edges:
@@ -332,6 +335,8 @@ class NOTEARS(StructureEstimator):
             for i in range(n)
             for j in range(n)
         ]
+
+        # Why are we normalizing only for l2
         if loss_type == "l2":
             df = df - np.mean(df, axis=0, keepdims=True)
 
@@ -364,6 +369,8 @@ class NOTEARS(StructureEstimator):
                 )
                 adjacency_matrix_new = sol.x
                 h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new, n), n)
+
+                # TODO: c is kind of an adaptive step size. Do we need it?
                 if h_new > c * h:
                     rho *= 10
                     lambda2 *= 2
