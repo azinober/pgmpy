@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
+from pgmpy import config
 from pgmpy.estimators import NOTEARS, ExpertKnowledge
 from pgmpy.models import BayesianNetwork
 from pgmpy.utils import get_example_model
@@ -34,22 +35,34 @@ class TestNoTEARS(unittest.TestCase):
             set(dag_rand_data.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
         )
 
+        dag_rand_logistic = self.est_rand_data.estimate(
+            lambda1=0.01, loss_type="logistic", show_progress=False
+        )
+        self.assertSetEqual(
+            set(dag_rand_logistic.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
+        )
+
     def test_estimate_expert(self):
         self.rand_data["E"] = self.rand_data["D"] + self.rand_data["B"]
         expert_knowledge = ExpertKnowledge(forbidden_edges=[("D", "E")])
         dag_rand_data = NOTEARS(self.rand_data).estimate(
-            lambda1=0.1, expert_knowledge=expert_knowledge, show_progress=False
+            lambda1=0.4,
+            alpha_2=5,
+            rho_max=1e20,
+            expert_knowledge=expert_knowledge,
+            max_iter=100,
+            show_progress=False,
         )
         self.assertSetEqual(
             set(dag_rand_data.edges()),
             set(
                 [("A", "D"), ("A", "C"), ("B", "C"), ("B", "E")]
-            ),  # Does not contain ("D","E")
+            ),  # Should not contain ("D","E")
         )
 
     def test_estimate_ecoli(self):
         est_edges = self.est_ecoli.estimate(
-            lambda1=0.5, max_iter=50, h_tol=1e-6, c=0.5, show_progress=False
+            lambda1=0.4, max_iter=50, h_tol=1e-6, c=0.5, show_progress=False
         ).edges()
         self.assertTrue(len(set(est_edges) - self.ecoli_edges) <= 10)
 
@@ -60,3 +73,13 @@ class TestNoTEARS(unittest.TestCase):
         del self.ecoli_data
         del self.ecoli_edges
         del self.est_ecoli
+
+
+class TestNoTEARSTorch(TestNoTEARS):
+    def setUp(self):
+        config.set_backend("torch")
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+        config.set_backend("numpy")

@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import scipy.linalg as slin
 import scipy.optimize as sopt
@@ -34,16 +36,16 @@ class NOTEARS(StructureEstimator):
     def __init__(self, data, **kwargs):
         super(NOTEARS, self).__init__(data=data, **kwargs)
 
-    def _loss_grad(self, loss_type, X, W):
+    def _loss_grad(self, loss_type, df, adjacency_matrix):
         """
         Calculate the value of the loss function and its gradient.
 
         Parameters
         ----------
-        X: numpy.ndarray
-            The data used for DAG estimation.
+        df: numpy.ndarray
+            The data passed for DAG estimation.
 
-        W: numpy.ndarray
+        adjacency_matrix: numpy.ndarray
             The weighted matrix for the DAG.
 
         Returns
@@ -54,27 +56,27 @@ class NOTEARS(StructureEstimator):
         G_loss: numpy.ndarray
             The gradient of the loss function for given data.
         """
-        M = X @ W
+        M = df @ adjacency_matrix
         if loss_type == "l2":
-            R = X - M
-            loss = 0.5 / X.shape[0] * (R**2).sum()
-            G_loss = -1.0 / X.shape[0] * X.T @ R
+            R = df - M
+            loss = 0.5 / df.shape[0] * (R**2).sum()
+            G_loss = -1.0 / df.shape[0] * df.T @ R
 
         elif loss_type == "logistic":
-            loss = 1.0 / X.shape[0] * (np.logaddexp(0, M) - X * M).sum()
-            G_loss = 1.0 / X.shape[0] * X.T @ (sigmoid(M) - X)
+            loss = 1.0 / df.shape[0] * (np.logaddexp(0, M) - df * M).sum()
+            G_loss = 1.0 / df.shape[0] * df.T @ (sigmoid(M) - df)
 
         elif loss_type == "poisson":
             S = np.exp(M)
-            loss = 1.0 / X.shape[0] * (S - X * M).sum()
-            G_loss = 1.0 / X.shape[0] * X.T @ (S - X)
+            loss = 1.0 / df.shape[0] * (S - df * M).sum()
+            G_loss = 1.0 / df.shape[0] * df.T @ (S - df)
 
         else:
             raise ValueError("unknown loss type")
 
         return loss, G_loss
 
-    def _constraint_grad(self, W, n):
+    def _constraint_grad(self, adjacency_matrix, n):
         """
         Calculate the value of the acyclicity constraint and its gradient.
 
@@ -93,12 +95,12 @@ class NOTEARS(StructureEstimator):
         g_h: numpy.ndarray
             The gradient of the objective function for given parameters.
         """
-        E = slin.expm(W * W)
+        E = slin.expm(adjacency_matrix * adjacency_matrix)
         h = np.trace(E) - n
-        G_h = E.T * W * 2
+        G_h = E.T * adjacency_matrix * 2
         return h, G_h
 
-    def _adj(self, w, n):
+    def _adj(self, adjacency_matrix_doubled, n):
         """
         Convert doubled array ([2 d^2] array) back to original variables ([d, d] matrix).
 
@@ -107,12 +109,85 @@ class NOTEARS(StructureEstimator):
 
         Returns
         -------
-        w: numpy.ndarray
+        adjacency_matrix: numpy.ndarray
             The weighted matrix in original dimensions (n*n)
         """
-        return (w[: n * n] - w[n * n :]).reshape([n, n])
+        return (
+            adjacency_matrix_doubled[: n * n] - adjacency_matrix_doubled[n * n :]
+        ).reshape([n, n])
 
-    def _objective_function(self, w, alpha, rho, lambda1, n, loss_type, X):
+    def _forbidden_penalty_gradient(self, W, forbidden_mask):
+        """
+        Evaluate value and gradient for masking adjacency matrix using forbidden edge data.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        loss: float
+            The value of the objective function for given parameters.
+
+        grad: numpy.ndarray
+            The gradient of the objective function for given parameters.
+        """
+        loss = np.sum(np.abs(W) * forbidden_mask)
+        grad = forbidden_mask * np.sign(W)
+        return loss, grad
+
+    def _fixed_penalty_gradient(self, W, fixed_mask, alpha, w_threshold):
+        """
+        Evaluate value and gradient for masking adjacency matrix using required edge data.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        loss: float
+            The value of the objective function for given parameters.
+
+        grad: numpy.ndarray
+            The gradient of the objective function for given parameters.
+        """
+        fixed_W = W * fixed_mask
+
+        vectorized_func = np.vectorize(
+            lambda x: (
+                math.exp(-1 / ((w_threshold - x) ** (1 / alpha)))
+                if x > w_threshold
+                else 0
+            )
+        )
+        loss = np.sum(vectorized_func(fixed_W))
+
+        vectorized_grad = np.vectorize(
+            lambda x: (
+                math.exp(-1 / ((w_threshold - x) ** (1 / alpha)))
+                / (alpha * ((w_threshold - x) ** (1 + (1 / alpha))))
+                if x > w_threshold
+                else 0
+            )
+        )
+
+        return loss, vectorized_grad(fixed_W)
+
+    def _objective_function(
+        self,
+        adjacency_matrix_doubled,
+        alpha,
+        rho,
+        lambda1,
+        lambda2,
+        lambda3,
+        n,
+        loss_type,
+        df,
+        forbidden_mask,
+        fixed_mask,
+        w_threshold,
+        alpha_2,
+    ):
         """
         Evaluate value and gradient of augmented Lagrangian for doubled variables ([2 d^2] array).
 
@@ -127,12 +202,32 @@ class NOTEARS(StructureEstimator):
         g_obj: numpy.ndarray
             The gradient of the objective function for given parameters.
         """
-        W = self._adj(w, n)
-        loss, G_loss = self._loss_grad(loss_type, X, W)
-        h, G_h = self._constraint_grad(W, n)
+        adjacency_matrix_est = self._adj(adjacency_matrix_doubled, n)
+        loss, G_loss = self._loss_grad(loss_type, df, adjacency_matrix_est)
+        h, G_h = self._constraint_grad(adjacency_matrix_est, n)
 
-        obj = loss + 0.5 * rho * h * h + alpha * h + lambda1 * w.sum()
-        G_smooth = G_loss + (rho * h + alpha) * G_h
+        forb_penalty, forb_penalty_gradient = self._forbidden_penalty_gradient(
+            adjacency_matrix_est, forbidden_mask
+        )
+        fixed_penalty, fixed_penalty_gradient = self._fixed_penalty_gradient(
+            adjacency_matrix_est, fixed_mask, alpha_2, w_threshold
+        )
+
+        obj = (
+            loss
+            + 0.5 * rho * h * h
+            + alpha * h
+            + lambda1 * adjacency_matrix_doubled.sum()
+            + lambda2 * forb_penalty
+            + lambda3 * fixed_penalty
+        )
+        G_smooth = (
+            G_loss
+            + (rho * h + alpha) * G_h
+            + lambda2 * forb_penalty_gradient
+            + lambda3 * fixed_penalty_gradient
+        )
+        # print(G_smooth, lambda1)
         g_obj = np.concatenate((G_smooth + lambda1, -G_smooth + lambda1), axis=None)
         return obj, g_obj
 
@@ -145,6 +240,7 @@ class NOTEARS(StructureEstimator):
         rho_max=1e16,
         w_threshold=0.3,
         c=0.25,
+        alpha_2=0.1,
         expert_knowledge=None,
         show_progress=True,
     ):
@@ -206,22 +302,29 @@ class NOTEARS(StructureEstimator):
 
         n = self.data.shape[1]
         nodes = self.data.columns.to_list()
-        X = self.data.to_numpy()
+        df = self.data.to_numpy()
 
-        # Step 1: Initialize starting guesses
-        w_est, rho, alpha, h = (
+        # Step 1: Initialize starting estimates
+        adjacency_matrix_est, rho, alpha, h = (
             np.zeros(2 * n * n),
             1.0,
             0.0,
             np.inf,
         )  # double w_est into (w_pos, w_neg)
+        lambda2, lambda3 = 0.1, 0.01
 
-        expert_mask = np.ones(2 * n * n)
+        forbidden_mask = np.zeros(shape=(n, n))
         for u, v in expert_knowledge.forbidden_edges:
             i = nodes.index(u)
             j = nodes.index(v)
-            expert_mask[i * n + j] = 0
-            expert_mask[(i + n) * n + j] = 0
+            forbidden_mask[i][j] = 1
+        # print(forbidden_mask)
+        # print(nodes)
+        fixed_mask = np.zeros(shape=(n, n))
+        for u, v in expert_knowledge.required_edges:
+            i = nodes.index(u)
+            j = nodes.index(v)
+            fixed_mask[i][j] = 1
 
         bounds = [
             (0, 0) if i == j else (0, None)
@@ -230,46 +333,61 @@ class NOTEARS(StructureEstimator):
             for j in range(n)
         ]
         if loss_type == "l2":
-            X = X - np.mean(X, axis=0, keepdims=True)
+            df = df - np.mean(df, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
         for _ in iteration:
-            w_new, h_new = None, None
+            adjacency_matrix_new, h_new = None, None
 
             # Step 2.(a): Solve for new values of W and h
             while rho < rho_max:
                 sol = sopt.minimize(
                     self._objective_function,
-                    w_est,
-                    args=(alpha, rho, lambda1, n, loss_type, X),
+                    adjacency_matrix_est,
+                    args=(
+                        alpha,
+                        rho,
+                        lambda1,
+                        lambda2,
+                        lambda3,
+                        n,
+                        loss_type,
+                        df,
+                        forbidden_mask,
+                        fixed_mask,
+                        w_threshold,
+                        alpha_2,
+                    ),
                     method="L-BFGS-B",
                     jac=True,
                     bounds=bounds,
                 )
-                w_new = sol.x
-                h_new, _ = self._constraint_grad(self._adj(w_new, n), n)
+                adjacency_matrix_new = sol.x
+                h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new, n), n)
                 if h_new > c * h:
                     rho *= 10
+                    lambda2 *= 2
+                    lambda3 *= 1.1
                 else:
                     break
 
             # Step 2.(b): Update alpha
-            w_est, h = w_new, h_new
-            w_est = w_est * expert_mask
+            adjacency_matrix_est, h = adjacency_matrix_new, h_new
             alpha += rho * h
 
             # Step 2.(c): Break away if h converges to 0
             if h <= h_tol or rho >= rho_max:
+                # print(rho,rho_max, h, h_tol)
                 break
 
-        # Step 3: Apply threshold to final weighted matrix
-        W_est = self._adj(w_est, n)
-        W_est[np.abs(W_est) < w_threshold] = 0
+        # Step 3: Convert doubled matrix to normal n*n and apply threshold to final weighted matrix
+        adjacency_matrix_est = self._adj(adjacency_matrix_est, n)
+        adjacency_matrix_est[np.abs(adjacency_matrix_est) < w_threshold] = 0
 
         edges = []
         for i in range(n):
             for j in range(n):
-                if W_est[i][j] != 0:
+                if adjacency_matrix_est[i][j] != 0:
                     edges.append((nodes[i], nodes[j]))
 
         return DAG(ebunch=edges)
