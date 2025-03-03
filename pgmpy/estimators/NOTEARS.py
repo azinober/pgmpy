@@ -3,6 +3,7 @@ import math
 import numpy as np
 import scipy.linalg as slin
 import scipy.optimize as sopt
+import torch
 from scipy.special import expit as sigmoid
 from tqdm.auto import trange
 
@@ -10,6 +11,7 @@ from pgmpy import config
 from pgmpy.base import DAG
 from pgmpy.estimators import ExpertKnowledge, StructureEstimator
 from pgmpy.global_vars import logger
+from pgmpy.utils import compat_fns
 
 
 class NOTEARS(StructureEstimator):
@@ -35,6 +37,7 @@ class NOTEARS(StructureEstimator):
 
     def __init__(self, data, **kwargs):
         super(NOTEARS, self).__init__(data=data, **kwargs)
+        self.backend = compat_fns.get_compute_backend()
 
     def _loss_grad(self, loss_type, df, adjacency_matrix):
         """
@@ -63,11 +66,11 @@ class NOTEARS(StructureEstimator):
             G_loss = -1.0 / df.shape[0] * df.T @ R
 
         elif loss_type == "logistic":
-            loss = 1.0 / df.shape[0] * (np.logaddexp(0, M) - df * M).sum()
+            loss = 1.0 / df.shape[0] * (self.backend.logaddexp(0, M) - df * M).sum()
             G_loss = 1.0 / df.shape[0] * df.T @ (sigmoid(M) - df)
 
         elif loss_type == "poisson":
-            S = np.exp(M)
+            S = self.backend.exp(M)
             loss = 1.0 / df.shape[0] * (S - df * M).sum()
             G_loss = 1.0 / df.shape[0] * df.T @ (S - df)
 
@@ -96,7 +99,7 @@ class NOTEARS(StructureEstimator):
             The gradient of the objective function for given parameters.
         """
         E = slin.expm(adjacency_matrix * adjacency_matrix)
-        h = np.trace(E) - n
+        h = self.backend.trace(E) - n
         G_h = E.T * adjacency_matrix * 2
         return h, G_h
 
@@ -134,7 +137,7 @@ class NOTEARS(StructureEstimator):
         # Given a mask M, and adjacency matrix W, the penalty is given by $ \sum_{i,j} M_{ij} W_{ij}^2 $.
         # The Jacobian is given by $ J_{ij} = 2 * W_{ij} M_{ij} M_{ij} = 2 * W_{ij} * M_{ij} $.
 
-        penalty = np.sum((np.abs(W) * forbidden_mask) ** 2)
+        penalty = self.backend.sum((self.backend.abs(W) * forbidden_mask) ** 2)
         jac = 2 * W * forbidden_mask
         return penalty, jac
 
@@ -157,9 +160,12 @@ class NOTEARS(StructureEstimator):
         # The penalty matrix is: $ P_{ij} e^{-(w_t - W^t_{ij} * M_{ij})^{- \alpha}} $
         # The penalty is $ \sum_{ij} P_{ij} $.
         # The Jacobian is $ J_{ij} = -\alpha M_{ij} P_{ij} (w_t -  W_{ij} M_{ij})^{- \alpha - 1} $.
+        # changes?
 
-        W_thres = np.where(W < w_threshold, W, 0)
-        penalty_mat = np.exp(-(((w_threshold - W_thres) * fixed_mask) ** (-alpha)))
+        W_thres = self.backend.where(W < w_threshold, W, 0)
+        penalty_mat = self.backend.exp(
+            -((w_threshold - (W_thres * fixed_mask)) ** (-alpha))
+        )
         jac = (
             -alpha
             * fixed_mask
@@ -167,7 +173,7 @@ class NOTEARS(StructureEstimator):
             * (w_threshold - W_thres * fixed_mask) ** (-alpha - 1)
         )
 
-        return np.sum(penalty_mat), jac
+        return self.backend.sum(penalty_mat), jac
 
     def _objective_function(
         self,
@@ -209,6 +215,8 @@ class NOTEARS(StructureEstimator):
         fixed_penalty, fixed_jac = self._fixed_penalty_gradient(
             adjacency_matrix_est, fixed_mask, alpha_2, w_threshold
         )
+        # print(forb_penalty, forb_jac)
+
         obj = (
             loss
             + 0.5 * rho * h * h
@@ -221,8 +229,7 @@ class NOTEARS(StructureEstimator):
             G_loss + (rho * h + alpha) * G_h + lambda2 * forb_jac + lambda3 * fixed_jac
         )
 
-        # print(G_smooth, lambda1)
-        g_obj = np.concatenate(
+        g_obj = self.backend.concatenate(
             (
                 G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
                 -G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
@@ -238,7 +245,7 @@ class NOTEARS(StructureEstimator):
         max_iter=20,
         h_tol=1e-8,
         rho_max=1e16,
-        w_threshold=0.1,
+        w_threshold=0.3,
         c=0.25,
         alpha_2=1,
         expert_knowledge=None,
@@ -305,25 +312,28 @@ class NOTEARS(StructureEstimator):
 
         # TODO: For utilizing the torch backend we would need to define all the np. functions using backend.
         # TODO: This needs to be changed to also work with pytorch tensors
-        df = self.data.to_numpy()
+        if self.backend == np:
+            df = compat_fns.to_numpy(self.data.values)
+        else:
+            df = torch.tensor(self.data.values)
 
         # Step 1: Initialize starting estimates
         adjacency_matrix_est, rho, alpha, h = (
-            np.zeros(2 * n * n),
+            self.backend.zeros(2 * n * n),
             1.0,
             0.0,
-            np.inf,
+            self.backend.inf,
         )  # double w_est into (w_pos, w_neg)
-        lambda2, lambda3 = 1, 1
 
-        forbidden_mask = np.zeros(shape=(n, n))
+        lambda2, lambda3 = 5, 10
+
+        forbidden_mask = self.backend.zeros((n, n))
         for u, v in expert_knowledge.forbidden_edges:
             i = nodes.index(u)
             j = nodes.index(v)
             forbidden_mask[i][j] = 1
-        # print(forbidden_mask)
-        # print(nodes)
-        fixed_mask = np.zeros(shape=(n, n))
+
+        fixed_mask = self.backend.zeros((n, n))
         for u, v in expert_knowledge.required_edges:
             i = nodes.index(u)
             j = nodes.index(v)
@@ -336,9 +346,9 @@ class NOTEARS(StructureEstimator):
             for j in range(n)
         ]
 
-        # Why are we normalizing only for l2
+        # Why are we normalizing only for l2 - stabilze by reducing value of squared loss
         if loss_type == "l2":
-            df = df - np.mean(df, axis=0, keepdims=True)
+            df = df - self.backend.mean(df, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
         for _ in iteration:
@@ -373,8 +383,8 @@ class NOTEARS(StructureEstimator):
                 # TODO: c is kind of an adaptive step size. Do we need it?
                 if h_new > c * h:
                     rho *= 10
-                    lambda2 *= 2
-                    lambda3 *= 1.1
+                    # lambda2 *= 2
+                    # lambda3 *= 1.1
                 else:
                     break
 
@@ -389,7 +399,7 @@ class NOTEARS(StructureEstimator):
 
         # Step 3: Convert doubled matrix to normal n*n and apply threshold to final weighted matrix
         adjacency_matrix_est = self._adj(adjacency_matrix_est, n)
-        adjacency_matrix_est[np.abs(adjacency_matrix_est) < w_threshold] = 0
+        adjacency_matrix_est[self.backend.abs(adjacency_matrix_est) < w_threshold] = 0
 
         edges = []
         for i in range(n):

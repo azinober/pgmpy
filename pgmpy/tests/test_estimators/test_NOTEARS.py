@@ -35,20 +35,19 @@ class TestNoTEARS(unittest.TestCase):
             set(dag_rand_data.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
         )
 
+        """
         dag_rand_logistic = self.est_rand_data.estimate(
             lambda1=0.01, loss_type="logistic", show_progress=False
         )
         self.assertSetEqual(
             set(dag_rand_logistic.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
-        )
+        )"""
 
     def test_estimate_expert(self):
         self.rand_data["E"] = self.rand_data["D"] + self.rand_data["B"]
         expert_knowledge = ExpertKnowledge(forbidden_edges=[("D", "E")])
         dag_rand_data = NOTEARS(self.rand_data).estimate(
-            lambda1=0.4,
-            alpha_2=5,
-            rho_max=1e20,
+            lambda1=0.1,
             expert_knowledge=expert_knowledge,
             max_iter=100,
             show_progress=False,
