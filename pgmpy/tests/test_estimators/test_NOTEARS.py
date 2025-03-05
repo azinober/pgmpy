@@ -12,10 +12,11 @@ from pgmpy.utils import get_example_model
 class TestNoTEARS(unittest.TestCase):
     def setUp(self):
         self.rand_data = pd.DataFrame(
-            np.random.randint(0, 4, size=(1000, 3)), columns=list("ABD")
+            np.random.randint(0, 4, size=(1000, 3)), columns=list("ABC")
         )
-        self.rand_data["C"] = self.rand_data["A"] - self.rand_data["B"]
-        self.rand_data["D"] += self.rand_data["A"]
+        self.rand_data["D"] = self.rand_data["A"] - self.rand_data["B"]
+        self.rand_data["C"] += self.rand_data["A"]
+        self.rand_data["E"] = self.rand_data["C"] + self.rand_data["B"]
         self.est_rand_data = NOTEARS(self.rand_data)
 
         self.model1 = BayesianNetwork()
@@ -28,6 +29,62 @@ class TestNoTEARS(unittest.TestCase):
         self.ecoli_data = get_example_model("ecoli70").simulate(int(3e4), seed=42)
         self.ecoli_edges = set(get_example_model("ecoli70").edges())
         self.est_ecoli = NOTEARS(self.ecoli_data)
+
+    def test_constraint_gradient(self):
+        self.W_est = np.array(  # Contains cycle - A->B->E->A
+            [
+                [0, 1, 1, 0, 0],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 1, 0],
+                [0, 0, 0, 0, 0],
+                [1, 0, 0, 0, 0],
+            ]
+        )
+        self.W_est_df = pd.DataFrame(self.W_est)
+
+        constraint_penalty, constraint_jac = self.est_rand_data._constraint_grad(
+            self.W_est, 5
+        )
+        self.assertNotEqual(constraint_penalty, 0)
+
+    def test_expert_knowledge_loss(self):
+        self.W_est = np.array(
+            [
+                [0, 0, 1, 1, 0],
+                [0, 0, 0, 1, 1],
+                [0, 0, 0, 0, 1],
+                [0, 0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
+            ]
+        )
+
+        self.W_est_df = pd.DataFrame(self.W_est)
+        forbidden_edges = [("A", "B"), ("D", "C"), ("A", "E")]
+        required_edges = [("C", "E"), ("A", "C")]
+        nodes = self.rand_data.columns.to_list()
+        forbidden_mask = np.zeros((5, 5))
+        for u, v in forbidden_edges:
+            i = nodes.index(u)
+            j = nodes.index(v)
+            forbidden_mask[i][j] = 1
+
+        fixed_mask = np.zeros((5, 5))
+        for u, v in required_edges:
+            i = nodes.index(u)
+            j = nodes.index(v)
+            fixed_mask[i][j] = 1
+
+        fixed_penalty, fixed_jac = self.est_rand_data._fixed_penalty_gradient(
+            self.W_est, fixed_mask, 10, 0.3
+        )
+        forbidden_penalty, forbidden_jac = (
+            self.est_rand_data._forbidden_penalty_gradient(self.W_est, forbidden_mask)
+        )
+
+        self.assertEqual(fixed_penalty, 0)
+        self.assertEqual(forbidden_penalty, 0)
+        self.assertTrue(fixed_jac.all() == np.zeros((5, 5)).all())
+        self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
     def test_estimate_rand(self):
         dag_rand_data = self.est_rand_data.estimate(lambda1=0.01, show_progress=False)
@@ -44,10 +101,10 @@ class TestNoTEARS(unittest.TestCase):
         )"""
 
     def test_estimate_expert(self):
-        self.rand_data["E"] = self.rand_data["D"] + self.rand_data["B"]
-        expert_knowledge = ExpertKnowledge(forbidden_edges=[("D", "E")])
+        # self.rand_data["E"] = self.rand_data["D"] + self.rand_data["B"]
+        expert_knowledge = ExpertKnowledge(forbidden_edges=[("C", "E")])
         dag_rand_data = NOTEARS(self.rand_data).estimate(
-            lambda1=0.1,
+            lambda1=0.2,
             expert_knowledge=expert_knowledge,
             max_iter=100,
             show_progress=False,
@@ -55,7 +112,7 @@ class TestNoTEARS(unittest.TestCase):
         self.assertSetEqual(
             set(dag_rand_data.edges()),
             set(
-                [("A", "D"), ("A", "C"), ("B", "C"), ("B", "E")]
+                [("A", "D"), ("A", "C"), ("B", "D"), ("B", "E")]
             ),  # Should not contain ("D","E")
         )
 

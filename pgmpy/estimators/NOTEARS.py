@@ -307,6 +307,7 @@ class NOTEARS(StructureEstimator):
         if expert_knowledge is None:
             expert_knowledge = ExpertKnowledge()
 
+        expert_knowledge._orient_temporal_forbidden_edges(DAG(), only_edges=False)
         n = self.data.shape[1]
         nodes = self.data.columns.to_list()
 
