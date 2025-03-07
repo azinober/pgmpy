@@ -191,7 +191,6 @@ class NOTEARS(StructureEstimator):
         lambda1,
         lambda2,
         lambda3,
-        n,
         loss_type,
         data,
         forbidden_mask,
@@ -363,8 +362,8 @@ class NOTEARS(StructureEstimator):
             data = data - self.backend.mean(data, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
+        adjacency_matrix_new, h_new = None, None
         for _ in iteration:
-            adjacency_matrix_new, h_new = None, None
 
             # Step 2.(a): Solve for new values of W and h
             while rho < rho_max:
@@ -377,7 +376,6 @@ class NOTEARS(StructureEstimator):
                         lambda1,
                         lambda2,
                         lambda3,
-                        n,
                         loss_type,
                         data,
                         forbidden_mask,
@@ -417,4 +415,6 @@ class NOTEARS(StructureEstimator):
                 if adjacency_matrix_est[i][j] != 0:
                     edges.append((nodes[i], nodes[j]))
 
-        return DAG(ebunch=edges)
+        dag = DAG(ebunch=edges)
+        dag.add_nodes_from(nodes)
+        return dag

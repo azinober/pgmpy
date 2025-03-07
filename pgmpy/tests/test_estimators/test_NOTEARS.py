@@ -7,6 +7,7 @@ import pandas as pd
 
 from pgmpy import config
 from pgmpy.estimators import NOTEARS, ExpertKnowledge
+from pgmpy.metrics import SHD
 from pgmpy.models import LinearGaussianBayesianNetwork as LGBN
 from pgmpy.utils import get_example_model
 
@@ -14,13 +15,13 @@ from pgmpy.utils import get_example_model
 class TestNoTEARS(unittest.TestCase):
     def setUp(self):
         self.rand_model = LGBN.get_random(
-            n_nodes=5, node_names=["A", "B", "C", "D", "E"], seed=42
+            n_nodes=5, node_names=["A", "B", "C", "D", "E"], loc=1, scale=0.2, seed=42
         )
         self.rand_data = self.rand_model.simulate(int(1e3), seed=42)
         self.est_rand = NOTEARS(self.rand_data)
 
-        self.ecoli_data = get_example_model("ecoli70").simulate(int(1e3), seed=42)
-        self.ecoli_edges = set(get_example_model("ecoli70").edges())
+        self.ecoli_model = get_example_model("ecoli70")
+        self.ecoli_data = self.ecoli_model.simulate(int(1e3), seed=42)
         self.est_ecoli = NOTEARS(self.ecoli_data)
 
     def test_constraint_gradient(self):
@@ -137,11 +138,9 @@ class TestNoTEARS(unittest.TestCase):
 
     def test_estimate_rand(self):
         est_dag = self.est_rand.estimate(
-            lambda1=0.4, show_progress=False, w_threshold=0.1
+            lambda1=0.4, w_threshold=0.1, show_progress=False
         )
-        # self.assertSetEqual(
-        #     set(est_dag.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
-        # )
+        self.assertEqual(set(est_dag.edges()), set(self.rand_model.edges()))
 
         """
         dag_rand_logistic = self.est_rand.estimate(
@@ -171,16 +170,18 @@ class TestNoTEARS(unittest.TestCase):
         )
 
     def test_estimate_ecoli(self):
-        est_edges = self.est_ecoli.estimate(
-            lambda1=0.4, max_iter=5, h_tol=1e-6, c=0.5, show_progress=False
-        ).edges()
-        self.assertTrue(len(set(est_edges) - self.ecoli_edges) <= 10)
+        est_dag = self.est_ecoli.estimate(
+            lambda1=0.8, w_threshold=0.2, show_progress=False
+        )
+        self.assertEqual(SHD(self.ecoli_model, est_dag), 56)
 
     def tearDown(self):
+        del self.rand_model
         del self.rand_data
         del self.est_rand
+
+        del self.ecoli_model
         del self.ecoli_data
-        del self.ecoli_edges
         del self.est_ecoli
 
 
