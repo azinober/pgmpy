@@ -39,13 +39,13 @@ class NOTEARS(StructureEstimator):
         super(NOTEARS, self).__init__(data=data, **kwargs)
         self.backend = compat_fns.get_compute_backend()
 
-    def _loss_grad(self, loss_type, df, adjacency_matrix):
+    def _loss_grad(self, loss_type, data, adjacency_matrix):
         """
         Calculate the value of the loss function and its gradient.
 
         Parameters
         ----------
-        df: numpy.ndarray
+        data: numpy.ndarray
             The data passed for DAG estimation.
 
         adjacency_matrix: numpy.ndarray
@@ -56,28 +56,28 @@ class NOTEARS(StructureEstimator):
         loss: float
             The value of the loss function for given data.
 
-        G_loss: numpy.ndarray
+        loss_jac: numpy.ndarray
             The gradient of the loss function for given data.
         """
-        M = df @ adjacency_matrix
+        M = data @ adjacency_matrix
         if loss_type == "l2":
-            R = df - M
-            loss = 0.5 / df.shape[0] * (R**2).sum()
-            G_loss = -1.0 / df.shape[0] * df.T @ R
+            R = data - M
+            loss = 0.5 / data.shape[0] * (R**2).sum()
+            loss_jac = -1.0 / data.shape[0] * data.T @ R
 
         elif loss_type == "logistic":
-            loss = 1.0 / df.shape[0] * (self.backend.logaddexp(0, M) - df * M).sum()
-            G_loss = 1.0 / df.shape[0] * df.T @ (sigmoid(M) - df)
+            loss = 1.0 / data.shape[0] * (self.backend.logaddexp(0, M) - data * M).sum()
+            loss_jac = 1.0 / data.shape[0] * data.T @ (sigmoid(M) - data)
 
         elif loss_type == "poisson":
             S = self.backend.exp(M)
-            loss = 1.0 / df.shape[0] * (S - df * M).sum()
-            G_loss = 1.0 / df.shape[0] * df.T @ (S - df)
+            loss = 1.0 / data.shape[0] * (S - data * M).sum()
+            loss_jac = 1.0 / data.shape[0] * data.T @ (S - data)
 
         else:
             raise ValueError("unknown loss type")
 
-        return loss, G_loss
+        return loss, loss_jac
 
     def _constraint_grad(self, adjacency_matrix, n):
         """
@@ -99,9 +99,9 @@ class NOTEARS(StructureEstimator):
             The gradient of the objective function for given parameters.
         """
         E = slin.expm(adjacency_matrix * adjacency_matrix)
-        h = self.backend.trace(E) - n
-        G_h = E.T * adjacency_matrix * 2
-        return h, G_h
+        acyclic_penalty = self.backend.trace(E) - n
+        acyclic_jac = E.T * adjacency_matrix * 2
+        return acyclic_penalty, acyclic_jac
 
     def _adj(self, adjacency_matrix_doubled, n):
         """
@@ -119,7 +119,7 @@ class NOTEARS(StructureEstimator):
             adjacency_matrix_doubled[: n * n] - adjacency_matrix_doubled[n * n :]
         ).reshape([n, n])
 
-    def _forbidden_penalty_gradient(self, W, forbidden_mask):
+    def _forbidden_penalty_gradient(self, adjacency_matrix, forbidden_mask):
         """
         Evaluate value and gradient for masking adjacency matrix using forbidden edge data.
 
@@ -137,11 +137,15 @@ class NOTEARS(StructureEstimator):
         # Given a mask M, and adjacency matrix W, the penalty is given by $ \sum_{i,j} M_{ij} W_{ij}^2 $.
         # The Jacobian is given by $ J_{ij} = 2 * W_{ij} M_{ij} M_{ij} = 2 * W_{ij} * M_{ij} $.
 
-        penalty = self.backend.sum((self.backend.abs(W) * forbidden_mask) ** 2)
-        jac = 2 * W * forbidden_mask
+        penalty = self.backend.sum(
+            (self.backend.abs(adjacency_matrix) * forbidden_mask) ** 2
+        )
+        jac = 2 * adjacency_matrix * forbidden_mask
         return penalty, jac
 
-    def _fixed_penalty_gradient(self, W, fixed_mask, alpha, w_threshold):
+    def _fixed_penalty_gradient(
+        self, adjacency_matrix, fixed_mask, alpha, weight_threshold
+    ):
         """
         Evaluate value and gradient for masking adjacency matrix using required edge data.
 
@@ -162,15 +166,17 @@ class NOTEARS(StructureEstimator):
         # The Jacobian is $ J_{ij} = -\alpha M_{ij} P_{ij} (w_t -  W_{ij} M_{ij})^{- \alpha - 1} $.
         # changes?
 
-        W_thres = self.backend.where(W < w_threshold, W, 0)
+        W_thres = self.backend.where(
+            adjacency_matrix < weight_threshold, adjacency_matrix, 0
+        )
         penalty_mat = self.backend.exp(
-            -((w_threshold - (W_thres * fixed_mask)) ** (-alpha))
+            -((weight_threshold - (W_thres * fixed_mask)) ** (-alpha))
         )
         jac = (
             -alpha
             * fixed_mask
             * penalty_mat
-            * (w_threshold - W_thres * fixed_mask) ** (-alpha - 1)
+            * (weight_threshold - W_thres * fixed_mask) ** (-alpha - 1)
         )
 
         return self.backend.sum(penalty_mat), jac
@@ -185,7 +191,7 @@ class NOTEARS(StructureEstimator):
         lambda3,
         n,
         loss_type,
-        df,
+        data,
         forbidden_mask,
         fixed_mask,
         w_threshold,
@@ -206,8 +212,8 @@ class NOTEARS(StructureEstimator):
             The gradient of the objective function for given parameters.
         """
         adjacency_matrix_est = self._adj(adjacency_matrix_doubled, n)
-        loss, G_loss = self._loss_grad(loss_type, df, adjacency_matrix_est)
-        h, G_h = self._constraint_grad(adjacency_matrix_est, n)
+        loss, loss_jac = self._loss_grad(loss_type, data, adjacency_matrix_est)
+        acyclic_penalty, acyclic_jac = self._constraint_grad(adjacency_matrix_est, n)
 
         forb_penalty, forb_jac = self._forbidden_penalty_gradient(
             adjacency_matrix_est, forbidden_mask
@@ -219,14 +225,17 @@ class NOTEARS(StructureEstimator):
 
         obj = (
             loss
-            + 0.5 * rho * h * h
-            + alpha * h
+            + 0.5 * rho * acyclic_penalty * acyclic_penalty
+            + alpha * acyclic_penalty
             + lambda1 * adjacency_matrix_doubled.sum()
             + lambda2 * forb_penalty
             + lambda3 * fixed_penalty
         )
         G_smooth = (
-            G_loss + (rho * h + alpha) * G_h + lambda2 * forb_jac + lambda3 * fixed_jac
+            loss_jac
+            + (rho * acyclic_penalty + alpha) * acyclic_jac
+            + lambda2 * forb_jac
+            + lambda3 * fixed_jac
         )
 
         g_obj = self.backend.concatenate(
@@ -241,6 +250,8 @@ class NOTEARS(StructureEstimator):
     def estimate(
         self,
         lambda1,
+        lambda2=5,
+        lambda3=10,
         loss_type="l2",
         max_iter=20,
         h_tol=1e-8,
@@ -311,12 +322,12 @@ class NOTEARS(StructureEstimator):
         n = self.data.shape[1]
         nodes = self.data.columns.to_list()
 
-        # TODO: For utilizing the torch backend we would need to define all the np. functions using backend.
-        # TODO: This needs to be changed to also work with pytorch tensors
-        if self.backend == np:
-            df = compat_fns.to_numpy(self.data.values)
+        if config.get_backend() == "numpy":
+            data = np.array(self.data.values, dtype=config.get_dtype())
         else:
-            df = torch.tensor(self.data.values)
+            data = torch.tensor(
+                self.data.values, dtype=config.get_dtype(), device=config.get_device()
+            )
 
         # Step 1: Initialize starting estimates
         adjacency_matrix_est, rho, alpha, h = (
@@ -325,8 +336,6 @@ class NOTEARS(StructureEstimator):
             0.0,
             self.backend.inf,
         )  # double w_est into (w_pos, w_neg)
-
-        lambda2, lambda3 = 5, 10
 
         forbidden_mask = self.backend.zeros((n, n))
         for u, v in expert_knowledge.forbidden_edges:
@@ -349,7 +358,7 @@ class NOTEARS(StructureEstimator):
 
         # Why are we normalizing only for l2 - stabilze by reducing value of squared loss
         if loss_type == "l2":
-            df = df - self.backend.mean(df, axis=0, keepdims=True)
+            data = data - self.backend.mean(data, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
         for _ in iteration:
@@ -368,7 +377,7 @@ class NOTEARS(StructureEstimator):
                         lambda3,
                         n,
                         loss_type,
-                        df,
+                        data,
                         forbidden_mask,
                         fixed_mask,
                         w_threshold,
@@ -384,8 +393,6 @@ class NOTEARS(StructureEstimator):
                 # TODO: c is kind of an adaptive step size. Do we need it?
                 if h_new > c * h:
                     rho *= 10
-                    # lambda2 *= 2
-                    # lambda3 *= 1.1
                 else:
                     break
 
