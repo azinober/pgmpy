@@ -79,7 +79,7 @@ class NOTEARS(StructureEstimator):
 
         return loss, loss_jac
 
-    def _constraint_grad(self, adjacency_matrix, n):
+    def _constraint_grad(self, adjacency_matrix):
         """
         Calculate the value of the acyclicity constraint and its gradient.
 
@@ -99,11 +99,11 @@ class NOTEARS(StructureEstimator):
             The gradient of the objective function for given parameters.
         """
         E = slin.expm(adjacency_matrix * adjacency_matrix)
-        acyclic_penalty = self.backend.trace(E) - n
+        acyclic_penalty = self.backend.trace(E) - adjacency_matrix.shape[0]
         acyclic_jac = E.T * adjacency_matrix * 2
         return acyclic_penalty, acyclic_jac
 
-    def _adj(self, adjacency_matrix_doubled, n):
+    def _adj(self, adjacency_matrix_doubled):
         """
         Convert doubled array ([2 d^2] array) back to original variables ([d, d] matrix).
 
@@ -115,9 +115,11 @@ class NOTEARS(StructureEstimator):
         adjacency_matrix: numpy.ndarray
             The weighted matrix in original dimensions (n*n)
         """
+        dim = np.sqrt(adjacency_matrix_doubled.shape[0] / 2).astype(int)
         return (
-            adjacency_matrix_doubled[: n * n] - adjacency_matrix_doubled[n * n :]
-        ).reshape([n, n])
+            adjacency_matrix_doubled[: dim * dim]
+            - adjacency_matrix_doubled[dim * dim :]
+        ).reshape([dim, dim])
 
     def _forbidden_penalty_gradient(self, adjacency_matrix, forbidden_mask):
         """
@@ -211,9 +213,9 @@ class NOTEARS(StructureEstimator):
         g_obj: numpy.ndarray
             The gradient of the objective function for given parameters.
         """
-        adjacency_matrix_est = self._adj(adjacency_matrix_doubled, n)
+        adjacency_matrix_est = self._adj(adjacency_matrix_doubled)
         loss, loss_jac = self._loss_grad(loss_type, data, adjacency_matrix_est)
-        acyclic_penalty, acyclic_jac = self._constraint_grad(adjacency_matrix_est, n)
+        acyclic_penalty, acyclic_jac = self._constraint_grad(adjacency_matrix_est)
 
         forb_penalty, forb_jac = self._forbidden_penalty_gradient(
             adjacency_matrix_est, forbidden_mask
@@ -388,7 +390,7 @@ class NOTEARS(StructureEstimator):
                     bounds=bounds,
                 )
                 adjacency_matrix_new = sol.x
-                h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new, n), n)
+                h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new))
 
                 # TODO: c is kind of an adaptive step size. Do we need it?
                 if h_new > c * h:
@@ -406,7 +408,7 @@ class NOTEARS(StructureEstimator):
                 break
 
         # Step 3: Convert doubled matrix to normal n*n and apply threshold to final weighted matrix
-        adjacency_matrix_est = self._adj(adjacency_matrix_est, n)
+        adjacency_matrix_est = self._adj(adjacency_matrix_est)
         adjacency_matrix_est[self.backend.abs(adjacency_matrix_est) < w_threshold] = 0
 
         edges = []
