@@ -136,7 +136,9 @@ class TestNoTEARS(unittest.TestCase):
         self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
     def test_estimate_rand(self):
-        est_dag = self.est_rand.estimate(lambda1=0.01, show_progress=False)
+        est_dag = self.est_rand.estimate(
+            lambda1=0.4, show_progress=False, w_threshold=0.1
+        )
         # self.assertSetEqual(
         #     set(est_dag.edges()), set([("A", "D"), ("A", "C"), ("B", "C")])
         # )

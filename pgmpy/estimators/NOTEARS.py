@@ -252,7 +252,7 @@ class NOTEARS(StructureEstimator):
     def estimate(
         self,
         lambda1,
-        lambda2=5,
+        lambda2=10,
         lambda3=10,
         loss_type="l2",
         max_iter=20,
