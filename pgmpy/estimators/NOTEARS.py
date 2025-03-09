@@ -5,6 +5,7 @@ import scipy.linalg as slin
 import scipy.optimize as sopt
 import torch
 from scipy.special import expit as sigmoid
+from torch.optim import LBFGS
 from tqdm.auto import trange
 
 from pgmpy import config
@@ -35,9 +36,10 @@ class NOTEARS(StructureEstimator):
     Information Processing Systems (NIPS'18). Curran Associates Inc., Red Hook, NY, USA, 9492–9503.
     """
 
-    def __init__(self, data, **kwargs):
+    def __init__(self, data, args=None, **kwargs):
         super(NOTEARS, self).__init__(data=data, **kwargs)
         self.backend = compat_fns.get_compute_backend()
+        self.args = args
 
     def _loss_grad(self, loss_type, data, adjacency_matrix):
         """
@@ -59,6 +61,9 @@ class NOTEARS(StructureEstimator):
         loss_jac: numpy.ndarray
             The gradient of the loss function for given data.
         """
+        if self.backend == torch:
+            adjacency_matrix = adjacency_matrix.double()
+
         M = data @ adjacency_matrix
         if loss_type == "l2":
             R = data - M
@@ -98,7 +103,10 @@ class NOTEARS(StructureEstimator):
         g_h: numpy.ndarray
             The gradient of the objective function for given parameters.
         """
+        # if config.get_backend()=="numpy":
         E = slin.expm(adjacency_matrix * adjacency_matrix)
+        if config.get_backend() == "torch":
+            E = torch.from_numpy(E)
         acyclic_penalty = self.backend.trace(E) - adjacency_matrix.shape[0]
         acyclic_jac = E.T * adjacency_matrix * 2
         return acyclic_penalty, acyclic_jac
@@ -222,7 +230,6 @@ class NOTEARS(StructureEstimator):
         fixed_penalty, fixed_jac = self._fixed_penalty_gradient(
             adjacency_matrix_est, fixed_mask, alpha_2, w_threshold
         )
-        # print(forb_penalty, forb_jac)
 
         obj = (
             loss
@@ -239,14 +246,30 @@ class NOTEARS(StructureEstimator):
             + lambda3 * fixed_jac
         )
 
-        g_obj = self.backend.concatenate(
-            (
-                G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
-                -G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
-            ),
-            axis=None,
-        )
+        if self.backend == torch:
+            g_obj = self.backend.concatenate(
+                (
+                    G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+                    -G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+                ),
+                dim=0,
+            )
+        else:
+            g_obj = self.backend.concatenate(
+                (
+                    G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+                    -G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+                ),
+                axis=None,
+            )
         return obj, g_obj
+
+    def closure(self):
+        self.lbfgs.zero_grad()  # Clear previous gradients
+        loss, _ = self._objective_function(*self.args)
+        loss = torch.tensor(loss, dtype=torch.float32, requires_grad=True)
+        loss.backward()
+        return loss
 
     def estimate(
         self,
@@ -259,7 +282,7 @@ class NOTEARS(StructureEstimator):
         rho_max=1e16,
         w_threshold=0.3,
         c=0.25,
-        alpha_2=1,
+        alpha_2=10,
         expert_knowledge=None,
         show_progress=True,
     ):
@@ -356,39 +379,64 @@ class NOTEARS(StructureEstimator):
             for i in range(n)
             for j in range(n)
         ]
+        self.args = (
+            adjacency_matrix_est,
+            alpha,
+            rho,
+            lambda1,
+            lambda2,
+            lambda3,
+            loss_type,
+            data,
+            forbidden_mask,
+            fixed_mask,
+            w_threshold,
+            alpha_2,
+        )
 
         # Why are we normalizing only for l2 - stabilze by reducing value of squared loss
         if loss_type == "l2":
             data = data - self.backend.mean(data, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
-        adjacency_matrix_new, h_new = None, None
         for _ in iteration:
+            adjacency_matrix_new, h_new = None, None
 
             # Step 2.(a): Solve for new values of W and h
             while rho < rho_max:
-                sol = sopt.minimize(
-                    self._objective_function,
-                    adjacency_matrix_est,
-                    args=(
-                        alpha,
-                        rho,
-                        lambda1,
-                        lambda2,
-                        lambda3,
-                        loss_type,
-                        data,
-                        forbidden_mask,
-                        fixed_mask,
-                        w_threshold,
-                        alpha_2,
-                    ),
-                    method="L-BFGS-B",
-                    jac=True,
-                    bounds=bounds,
-                )
-                adjacency_matrix_new = sol.x
-                h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new))
+                if self.backend == np:
+                    sol = sopt.minimize(
+                        self._objective_function,
+                        adjacency_matrix_est,
+                        args=(
+                            alpha,
+                            rho,
+                            lambda1,
+                            lambda2,
+                            lambda3,
+                            loss_type,
+                            data,
+                            forbidden_mask,
+                            fixed_mask,
+                            w_threshold,
+                            alpha_2,
+                        ),
+                        method="L-BFGS-B",
+                        jac=True,
+                        bounds=bounds,
+                    )
+                    adjacency_matrix_new = sol.x
+                    h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new))
+                else:
+                    self.lbfgs = LBFGS(
+                        [adjacency_matrix_est],
+                        history_size=10,
+                        max_iter=5,
+                        line_search_fn="strong_wolfe",
+                    )
+                    self.lbfgs.step(self.closure)
+                    adjacency_matrix_new = adjacency_matrix_est.detach().clone()
+                    h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new))
 
                 # TODO: c is kind of an adaptive step size. Do we need it?
                 if h_new > c * h:
@@ -402,7 +450,6 @@ class NOTEARS(StructureEstimator):
 
             # Step 2.(c): Break away if h converges to 0
             if h <= h_tol or rho >= rho_max:
-                # print(rho,rho_max, h, h_tol)
                 break
 
         # Step 3: Convert doubled matrix to normal n*n and apply threshold to final weighted matrix

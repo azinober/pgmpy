@@ -4,6 +4,7 @@ import networkx as nx
 import numpy as np
 import numpy.testing as np_test
 import pandas as pd
+import torch
 
 from pgmpy import config
 from pgmpy.estimators import NOTEARS, ExpertKnowledge
@@ -35,18 +36,23 @@ class TestNoTEARS(unittest.TestCase):
                 [1, 0, 0, 0, 0],
             ]
         )
+        if config.get_backend() == "torch":
+            W_est = torch.from_numpy(W_est)
 
         acyclic_penalty, acyclic_jac = self.est_rand._constraint_grad(W_est)
-        self.assertNotEqual(acyclic_penalty, 0)
-        self.assertAlmostEqual(acyclic_penalty, 0.5042, places=3)
+        self.assertNotEqual(float(acyclic_penalty), 0)
+        self.assertAlmostEqual(float(acyclic_penalty), 0.5042, places=3)
         np_test.assert_array_almost_equal(
             acyclic_jac[acyclic_jac > 0], [1.0167, 1.0167, 1.0167], decimal=3
         )
 
         # True model
         W_est = nx.adjacency_matrix(nx.DiGraph(self.rand_model.edges())).todense()
+        if config.get_backend() == "torch":
+            W_est = torch.from_numpy(W_est)
+
         acyclic_penalty, acyclic_jac = self.est_rand._constraint_grad(W_est)
-        self.assertAlmostEqual(acyclic_penalty, 0.0, places=3)
+        self.assertAlmostEqual(float(acyclic_penalty), 0.0, places=3)
         self.assertTrue((acyclic_jac == 0).all())
 
     def test_expert_knowledge_loss(self):
@@ -75,6 +81,10 @@ class TestNoTEARS(unittest.TestCase):
                 [0, 0, 0, 0, 0],
             ]
         )
+        if config.get_backend() == "torch":
+            W_est = torch.from_numpy(W_est)
+            fixed_mask = torch.from_numpy(fixed_mask)
+            forbidden_mask = torch.from_numpy(forbidden_mask)
 
         fixed_penalty, fixed_jac = self.est_rand._fixed_penalty_gradient(
             W_est, fixed_mask, 10, 0.3
@@ -83,8 +93,8 @@ class TestNoTEARS(unittest.TestCase):
             W_est, forbidden_mask
         )
 
-        self.assertEqual(fixed_penalty, 0)
-        self.assertEqual(forbidden_penalty, 0)
+        self.assertEqual(float(fixed_penalty), 0)
+        self.assertEqual(float(forbidden_penalty), 0)
         self.assertTrue(fixed_jac.all() == np.zeros((5, 5)).all())
         self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
@@ -98,6 +108,8 @@ class TestNoTEARS(unittest.TestCase):
                 [0, 0, 0, 0, 0],
             ]
         )
+        if config.get_backend() == "torch":
+            W_est = torch.from_numpy(W_est)
 
         fixed_penalty, fixed_jac = self.est_rand._fixed_penalty_gradient(
             W_est, fixed_mask, 10, 0.3
@@ -107,8 +119,8 @@ class TestNoTEARS(unittest.TestCase):
         )
 
         # TODO: Need to be fixed
-        self.assertEqual(fixed_penalty, 0)
-        self.assertEqual(forbidden_penalty, 0)
+        self.assertNotEqual(float(fixed_penalty), 0)
+        self.assertEqual(float(forbidden_penalty), 0)
         self.assertTrue(fixed_jac.all() == np.zeros((5, 5)).all())
         self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
@@ -122,6 +134,8 @@ class TestNoTEARS(unittest.TestCase):
                 [0, 0, 0, 0, 0],
             ]
         )
+        if config.get_backend() == "torch":
+            W_est = torch.from_numpy(W_est)
 
         fixed_penalty, fixed_jac = self.est_rand._fixed_penalty_gradient(
             W_est, fixed_mask, 10, 0.3
@@ -131,8 +145,8 @@ class TestNoTEARS(unittest.TestCase):
         )
 
         # TODO: Need to be fixed
-        self.assertEqual(fixed_penalty, 0)
-        self.assertEqual(forbidden_penalty, 0)
+        self.assertEqual(float(fixed_penalty), 0)
+        self.assertNotEqual(float(forbidden_penalty), 0)
         self.assertTrue(fixed_jac.all() == np.zeros((5, 5)).all())
         self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
