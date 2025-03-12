@@ -18,6 +18,7 @@ class TestNoTEARS(unittest.TestCase):
         self.rand_model = LGBN.get_random(
             n_nodes=5, node_names=["A", "B", "C", "D", "E"], loc=1, scale=0.2, seed=42
         )
+        print(self.rand_model.edges())
         self.rand_data = self.rand_model.simulate(int(1e3), seed=42)
         self.est_rand = NOTEARS(self.rand_data)
 
@@ -169,11 +170,15 @@ class TestNoTEARS(unittest.TestCase):
         est_dag = self.est_rand.estimate(
             lambda1=0.01, expert_knowledge=expert_knowledge, show_progress=False
         )
+        self.assertNotIn(set([("D", "C"), ("E", "B")]), est_dag.edges())
 
         expert_knowledge = ExpertKnowledge(fixed_edges=[("A", "B"), ("C", "D")])
         est_dag = self.est_rand.estimate(
             lambda1=0.01, expert_knowledge=expert_knowledge, show_progress=False
         )
+        self.assertIn(
+            set([("A", "B"), ("C", "D")]), est_dag.edges()
+        )  # fixed penalty failing
 
         expert_knowledge = ExpertKnowledge(
             forbidden_edges=[("D", "C"), ("E", "B")],
@@ -182,6 +187,8 @@ class TestNoTEARS(unittest.TestCase):
         est_dag = self.est_rand.estimate(
             lambda1=0.01, expert_knowledge=expert_knowledge, show_progress=False
         )
+        self.assertNotIn(set([("D", "C"), ("E", "B")]), est_dag.edges())
+        self.assertIn(set([("A", "B"), ("C", "D")]), est_dag.edges())
 
     def test_estimate_ecoli(self):
         est_dag = self.est_ecoli.estimate(

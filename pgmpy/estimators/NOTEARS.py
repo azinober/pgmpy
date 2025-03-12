@@ -267,7 +267,7 @@ class NOTEARS(StructureEstimator):
     def closure(self):
         self.lbfgs.zero_grad()  # Clear previous gradients
         loss, _ = self._objective_function(*self.args)
-        loss = torch.tensor(loss, dtype=torch.float32, requires_grad=True)
+        loss = torch.tensor(loss, dtype=config.DTYPE, requires_grad=True)
         loss.backward()
         return loss
 
@@ -281,7 +281,6 @@ class NOTEARS(StructureEstimator):
         h_tol=1e-8,
         rho_max=1e16,
         w_threshold=0.3,
-        c=0.25,
         alpha_2=10,
         expert_knowledge=None,
         show_progress=True,
@@ -314,9 +313,6 @@ class NOTEARS(StructureEstimator):
         w_threshold: float
             drop edge if |weight| < w_threshold
 
-        c: float
-            progress rate in the range (0, 1)
-
         Returns
         -------
         Estimated model: pgmpy.base.DAG
@@ -331,8 +327,6 @@ class NOTEARS(StructureEstimator):
             raise ValueError(
                 f"loss_type must be one of: l2, logistic, or poisson. Got: {loss_type}"
             )
-        if c <= 0 or c >= 1:
-            raise ValueError("c (progress rate) must be in the range (0, 1). Aborting")
 
         if show_progress and config.SHOW_PROGRESS:
             iteration = trange(int(max_iter))
@@ -438,8 +432,7 @@ class NOTEARS(StructureEstimator):
                     adjacency_matrix_new = adjacency_matrix_est.detach().clone()
                     h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new))
 
-                # TODO: c is kind of an adaptive step size. Do we need it?
-                if h_new > c * h:
+                if h_new > 0.25 * h:
                     rho *= 10
                 else:
                     break
