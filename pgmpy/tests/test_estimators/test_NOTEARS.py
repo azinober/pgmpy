@@ -18,7 +18,6 @@ class TestNoTEARS(unittest.TestCase):
         self.rand_model = LGBN.get_random(
             n_nodes=5, node_names=["A", "B", "C", "D", "E"], loc=1, scale=0.2, seed=42
         )
-        print(self.rand_model.edges())
         self.rand_data = self.rand_model.simulate(int(1e3), seed=42)
         self.est_rand = NOTEARS(self.rand_data)
 

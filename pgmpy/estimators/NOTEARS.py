@@ -1,4 +1,5 @@
 import math
+from functools import partial
 
 import numpy as np
 import scipy.linalg as slin
@@ -68,19 +69,23 @@ class NOTEARS(StructureEstimator):
             adjacency_matrix = adjacency_matrix.double()
 
         M = data @ adjacency_matrix
+        n_variables = adjacency_matrix.shape[0]
+
         if loss_type == "l2":
             R = data - M
-            loss = 0.5 / data.shape[0] * (R**2).sum()
-            loss_jac = -1.0 / data.shape[0] * data.T @ R
+            loss = (0.5 * (R**2).sum()) / (data.shape[0])
+            loss_jac = -(data.T @ R) / (data.shape[0])
 
         elif loss_type == "logistic":
-            loss = 1.0 / data.shape[0] * (self.backend.logaddexp(0, M) - data * M).sum()
-            loss_jac = 1.0 / data.shape[0] * data.T @ (sigmoid(M) - data)
+            loss = (1.0 / data.shape[0]) * (
+                self.backend.logaddexp(0, M) - data * M
+            ).sum()
+            loss_jac = (1.0 / data.shape[0]) * data.T @ (sigmoid(M) - data)
 
         elif loss_type == "poisson":
             S = self.backend.exp(M)
-            loss = 1.0 / data.shape[0] * (S - data * M).sum()
-            loss_jac = 1.0 / data.shape[0] * data.T @ (S - data)
+            loss = (1.0 / data.shape[0]) * (S - data * M).sum()
+            loss_jac = (1.0 / data.shape[0]) * data.T @ (S - data)
 
         else:
             raise ValueError(
@@ -250,7 +255,7 @@ class NOTEARS(StructureEstimator):
             The gradient of the objective function for given parameters.
         """
         adjacency_matrix_est = self._adj(adjacency_matrix_doubled)
-        loss, loss_jac = self._loss_grad(loss_type, data, adjacency_matrix_est)
+        loss, loss_jac = self._loss_grad(data, adjacency_matrix_est, loss_type)
         acyclic_penalty, acyclic_jac = self._constraint_grad(adjacency_matrix_est)
 
         forb_penalty, forb_jac = self._forbidden_penalty_gradient(
@@ -259,8 +264,7 @@ class NOTEARS(StructureEstimator):
         fixed_penalty, fixed_jac = self._fixed_penalty_gradient(
             adjacency_matrix_est, fixed_mask, alpha_2, w_threshold
         )
-
-        obj = (
+        total_loss = (
             loss
             + 0.5 * rho * acyclic_penalty * acyclic_penalty
             + alpha * acyclic_penalty
@@ -268,30 +272,20 @@ class NOTEARS(StructureEstimator):
             + lambda2 * forb_penalty
             + lambda3 * fixed_penalty
         )
-        G_smooth = (
+
+        loss_gradient = (
             loss_jac
             + (rho * acyclic_penalty + alpha) * acyclic_jac
             + lambda2 * forb_jac
             + lambda3 * fixed_jac
         )
 
-        if self.backend == torch:
-            g_obj = self.backend.concatenate(
-                (
-                    G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
-                    -G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
-                ),
-                dim=0,
-            )
-        else:
-            g_obj = self.backend.concatenate(
-                (
-                    G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
-                    -G_smooth + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
-                ),
-                axis=None,
-            )
-        return obj, g_obj
+        loss_gradient_double = compat_fns.concatenate(
+            loss_gradient + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+            -loss_gradient + lambda1 + lambda2 * forb_jac + lambda3 * fixed_jac,
+        )
+
+        return total_loss, loss_gradient_double
 
     def closure(self):
         self.lbfgs.zero_grad()  # Clear previous gradients
@@ -377,19 +371,19 @@ class NOTEARS(StructureEstimator):
             )
 
         # Step 1: Initialize starting estimates
-        adjacency_matrix_est, rho, alpha, h = (
-            self.backend.zeros(2 * n * n),
-            1.0,
-            0.0,
-            self.backend.inf,
-        )  # double w_est into (w_pos, w_neg)
+        adjacency_matrix_est = self.backend.zeros(2 * n * n)
+        rho = 1.0
+        alpha = 0.0
+        h = self.backend.inf
 
+        # Step 1.1: Initialize a mask for forbidden edges
         forbidden_mask = self.backend.zeros((n, n))
         for u, v in expert_knowledge.forbidden_edges:
             i = nodes.index(u)
             j = nodes.index(v)
             forbidden_mask[i][j] = 1
 
+        # Step 1.2: Initialize a mask for fixed edges
         fixed_mask = self.backend.zeros((n, n))
         for u, v in expert_knowledge.required_edges:
             i = nodes.index(u)
@@ -417,9 +411,11 @@ class NOTEARS(StructureEstimator):
             alpha_2,
         )
 
-        # Why are we normalizing only for l2 - stabilze by reducing value of squared loss
         if loss_type == "l2":
-            data = data - self.backend.mean(data, axis=0, keepdims=True)
+            logger.info("Normalizing data to 0 mean and unit standard deviation.")
+            data = (
+                data - self.backend.mean(data, axis=0, keepdims=True)
+            ) / self.backend.std(data, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
         for _ in iteration:
@@ -427,23 +423,25 @@ class NOTEARS(StructureEstimator):
 
             # Step 2.(a): Solve for new values of W and h
             while rho < rho_max:
+                obj_fun = partial(
+                    self._objective_function,
+                    alpha=alpha,
+                    rho=rho,
+                    lambda1=lambda1,
+                    lambda2=lambda2,
+                    lambda3=lambda3,
+                    loss_type=loss_type,
+                    data=data,
+                    forbidden_mask=forbidden_mask,
+                    fixed_mask=fixed_mask,
+                    w_threshold=w_threshold,
+                    alpha_2=alpha_2,
+                )
+
                 if self.backend == np:
                     sol = sopt.minimize(
-                        self._objective_function,
+                        obj_fun,
                         adjacency_matrix_est,
-                        args=(
-                            alpha,
-                            rho,
-                            lambda1,
-                            lambda2,
-                            lambda3,
-                            loss_type,
-                            data,
-                            forbidden_mask,
-                            fixed_mask,
-                            w_threshold,
-                            alpha_2,
-                        ),
                         method="L-BFGS-B",
                         jac=True,
                         bounds=bounds,

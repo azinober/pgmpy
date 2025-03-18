@@ -153,3 +153,10 @@ def matrix_exp(arr):
         return expm(arr * arr)
     else:
         return torch.matrix_exp(arr * arr)
+
+
+def concatenate(arr1, arr2):
+    if isinstance(arr1, np.ndarray) and isinstance(arr2, np.ndarray):
+        return np.concatenate((arr1, arr2), axis=None)
+    else:
+        return torch.concatenate((arr1, arr2), dim=0)
