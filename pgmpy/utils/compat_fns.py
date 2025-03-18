@@ -3,6 +3,7 @@ from copy import deepcopy
 
 import numpy as np
 import torch
+from scipy.linalg import expm
 
 from pgmpy import config
 
@@ -145,3 +146,10 @@ def allclose(arr1, arr2, atol):
             torch.tensor(arr2, dtype=config.get_dtype(), device=config.get_device()),
             atol=atol,
         )
+
+
+def matrix_exp(arr):
+    if isinstance(arr, np.ndarray):
+        return expm(arr * arr)
+    else:
+        return torch.matrix_exp(arr * arr)

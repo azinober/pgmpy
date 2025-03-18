@@ -41,7 +41,7 @@ class NOTEARS(StructureEstimator):
         self.backend = compat_fns.get_compute_backend()
         self.args = args
 
-    def _loss_grad(self, loss_type, data, adjacency_matrix):
+    def _loss_grad(self, data, adjacency_matrix, loss_type):
         """
         Calculate the value of the loss function and its gradient.
 
@@ -51,7 +51,10 @@ class NOTEARS(StructureEstimator):
             The data passed for DAG estimation.
 
         adjacency_matrix: numpy.ndarray
-            The weighted matrix for the DAG.
+            The weighted adjacency matrix for the DAG.
+
+        loss_type: str (l2 | logistic | poisson)
+            The method to use for computing the loss.
 
         Returns
         -------
@@ -80,7 +83,9 @@ class NOTEARS(StructureEstimator):
             loss_jac = 1.0 / data.shape[0] * data.T @ (S - data)
 
         else:
-            raise ValueError("unknown loss type")
+            raise ValueError(
+                "Unknown `loss_type`. Only `l2`, `logistic`, and `poisson` are supported."
+            )
 
         return loss, loss_jac
 
@@ -88,25 +93,27 @@ class NOTEARS(StructureEstimator):
         """
         Calculate the value of the acyclicity constraint and its gradient.
 
-        The acyclicity constraint is given by  -
-            h(W) = trace(exp(W*W)) - d
-                where W is the weighted matrix and d is the number of nodes in graph.
+        The acyclicity constraint is given by:
+
+        .. math:: h(W) = \textit{tr}(e^{(W*W)}) - d
+
+        where :math:`W` is the weighted adjacency matrix and :math:`d` is the
+        number of nodes in graph.
 
         Parameters
         ----------
+        adjacency_matrix: 2D array
+            The weighted adjacency matrix of shape d x d.
 
         Returns
         -------
-        h: float
-            The value of the constraint function for given parameters.
+        acyclic_penalty: float
+            The penalty value for the given `adjacency_matrix`.
 
-        g_h: numpy.ndarray
-            The gradient of the objective function for given parameters.
+        acyclic_jac: numpy.ndarray
+            The gradient of the penalty at the `adjacency_matrix`.
         """
-        # if config.get_backend()=="numpy":
-        E = slin.expm(adjacency_matrix * adjacency_matrix)
-        if config.get_backend() == "torch":
-            E = torch.from_numpy(E)
+        E = compat_fns.matrix_exp(adjacency_matrix * adjacency_matrix)
         acyclic_penalty = self.backend.trace(E) - adjacency_matrix.shape[0]
         acyclic_jac = E.T * adjacency_matrix * 2
         return acyclic_penalty, acyclic_jac
@@ -117,6 +124,8 @@ class NOTEARS(StructureEstimator):
 
         Parameters
         ----------
+        adjacency_matrix_doubled: 2D array
+            The doubled adjacency matrix that need to be converted back to an adjacency matrix.
 
         Returns
         -------
@@ -135,6 +144,12 @@ class NOTEARS(StructureEstimator):
 
         Parameters
         ----------
+        adjacency_matrix: 2D array
+            The weighted adjacency matrix.
+
+        forbidden_mask: 2D array
+            A binary mask representing the forbidden edges. A value of 1 in the
+            mask represents that the corresponding edge is forbidden.
 
         Returns
         -------
@@ -161,14 +176,28 @@ class NOTEARS(StructureEstimator):
 
         Parameters
         ----------
+        adjacency_matrix: 2D array
+            The weighted adjacency matrix.
+
+        fixed_mask: 2D array
+            A binary mask array representing which edges need to exist in the
+            graph. A value of 1 in the mask represents that the corresponding
+            edge in the adjacency matrix must exist.
+
+        alpha: float
+            TODO:
+
+        weight_threshold: float
+            The threshold for the values in adjacency_matrix above which it is
+            considered to represent an edge.
 
         Returns
         -------
         loss: float
-            The value of the objective function for given parameters.
+            The penalty for fixed edges at the given adjacency_matrix.
 
         grad: numpy.ndarray
-            The gradient of the objective function for given parameters.
+            The gradient of the penalty at the given adjacency_matrix.
         """
         # Given a mask M, and adjacency matrix W, we define W^t = W if W < w_threshold else 0.
         # The penalty matrix is: $ P_{ij} e^{-(w_t - W^t_{ij} * M_{ij})^{- \alpha}} $
