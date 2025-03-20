@@ -34,7 +34,8 @@ class TestNoTEARS(unittest.TestCase):
                 [0, 0, 0, 1, 0],
                 [0, 0, 0, 0, 0],
                 [1, 0, 0, 0, 0],
-            ]
+            ],
+            dtype="float64",
         )
         if config.get_backend() == "torch":
             W_est = torch.from_numpy(W_est)
@@ -49,7 +50,8 @@ class TestNoTEARS(unittest.TestCase):
         # True model
         W_est = nx.adjacency_matrix(nx.DiGraph(self.rand_model.edges())).todense()
         if config.get_backend() == "torch":
-            W_est = torch.from_numpy(W_est)
+            W_est = torch.from_numpy(W_est).to(torch.float64)
+            # W_est = W_est.to('float64')
 
         acyclic_penalty, acyclic_jac = self.est_rand._constraint_grad(W_est)
         self.assertAlmostEqual(float(acyclic_penalty), 0.0, places=3)
@@ -93,8 +95,8 @@ class TestNoTEARS(unittest.TestCase):
             W_est, forbidden_mask
         )
 
-        self.assertEqual(float(fixed_penalty), 0)
-        self.assertEqual(float(forbidden_penalty), 0)
+        self.assertEqual(float(fixed_penalty), 0.0)
+        self.assertEqual(float(forbidden_penalty), 0.0)
         self.assertTrue(fixed_jac.all() == np.zeros((5, 5)).all())
         self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
@@ -119,8 +121,8 @@ class TestNoTEARS(unittest.TestCase):
         )
 
         # TODO: Need to be fixed
-        self.assertNotEqual(float(fixed_penalty), 0)
-        self.assertEqual(float(forbidden_penalty), 0)
+        self.assertNotEqual(float(fixed_penalty), 0.0)
+        self.assertEqual(float(forbidden_penalty), 0.0)
         self.assertTrue(fixed_jac.all() == np.zeros((5, 5)).all())
         self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
@@ -145,14 +147,14 @@ class TestNoTEARS(unittest.TestCase):
         )
 
         # TODO: Need to be fixed
-        self.assertEqual(float(fixed_penalty), 0)
-        self.assertNotEqual(float(forbidden_penalty), 0)
+        self.assertEqual(float(fixed_penalty), 0.0)
+        self.assertNotEqual(float(forbidden_penalty), 0.0)
         self.assertTrue(fixed_jac.all() == np.zeros((5, 5)).all())
         self.assertTrue(forbidden_jac.all() == np.zeros((5, 5)).all())
 
     def test_estimate_rand(self):
         est_dag = self.est_rand.estimate(
-            lambda1=0.4, w_threshold=0.1, show_progress=False
+            lambda1=0.2, w_threshold=0.3, show_progress=False
         )
         self.assertEqual(set(est_dag.edges()), set(self.rand_model.edges()))
 

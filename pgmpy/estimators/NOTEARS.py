@@ -273,6 +273,9 @@ class NOTEARS(StructureEstimator):
             + lambda3 * fixed_penalty
         )
 
+        if self.backend == torch:
+            return total_loss
+
         loss_gradient = (
             loss_jac
             + (rho * acyclic_penalty + alpha) * acyclic_jac
@@ -396,8 +399,7 @@ class NOTEARS(StructureEstimator):
             for i in range(n)
             for j in range(n)
         ]
-        self.args = (
-            adjacency_matrix_est,
+        self.args = [
             alpha,
             rho,
             lambda1,
@@ -409,7 +411,7 @@ class NOTEARS(StructureEstimator):
             fixed_mask,
             w_threshold,
             alpha_2,
-        )
+        ]
 
         if loss_type == "l2":
             logger.info("Normalizing data to 0 mean and unit standard deviation.")
@@ -418,59 +420,98 @@ class NOTEARS(StructureEstimator):
             ) / self.backend.std(data, axis=0, keepdims=True)
 
         # Step 2: Iterate until max_iter iterations
-        for _ in iteration:
-            adjacency_matrix_new, h_new = None, None
+        if self.backend == np:
+            for _ in iteration:
+                adjacency_matrix_new, h_new = None, None
 
-            # Step 2.(a): Solve for new values of W and h
-            while rho < rho_max:
-                obj_fun = partial(
-                    self._objective_function,
-                    alpha=alpha,
-                    rho=rho,
-                    lambda1=lambda1,
-                    lambda2=lambda2,
-                    lambda3=lambda3,
-                    loss_type=loss_type,
-                    data=data,
-                    forbidden_mask=forbidden_mask,
-                    fixed_mask=fixed_mask,
-                    w_threshold=w_threshold,
-                    alpha_2=alpha_2,
-                )
-
-                if self.backend == np:
-                    sol = sopt.minimize(
-                        obj_fun,
-                        adjacency_matrix_est,
-                        method="L-BFGS-B",
-                        jac=True,
-                        bounds=bounds,
+                # Step 2.(a): Solve for new values of W and h
+                while rho < rho_max:
+                    obj_fun = partial(
+                        self._objective_function,
+                        alpha=alpha,
+                        rho=rho,
+                        lambda1=lambda1,
+                        lambda2=lambda2,
+                        lambda3=lambda3,
+                        loss_type=loss_type,
+                        data=data,
+                        forbidden_mask=forbidden_mask,
+                        fixed_mask=fixed_mask,
+                        w_threshold=w_threshold,
+                        alpha_2=alpha_2,
                     )
-                    adjacency_matrix_new = sol.x
-                    h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new))
-                else:
-                    self.lbfgs = LBFGS(
-                        [adjacency_matrix_est],
-                        history_size=10,
-                        max_iter=5,
-                        line_search_fn="strong_wolfe",
-                    )
-                    self.lbfgs.step(self.closure)
-                    adjacency_matrix_new = adjacency_matrix_est.detach().clone()
-                    h_new, _ = self._constraint_grad(self._adj(adjacency_matrix_new))
 
-                if h_new > 0.25 * h:
-                    rho *= 10
-                else:
+                    if self.backend == np:
+                        sol = sopt.minimize(
+                            obj_fun,
+                            adjacency_matrix_est,
+                            method="L-BFGS-B",
+                            jac=True,
+                            bounds=bounds,
+                        )
+                        adjacency_matrix_new = sol.x
+                        h_new, _ = self._constraint_grad(
+                            self._adj(adjacency_matrix_new)
+                        )
+
+                    if h_new > 0.25 * h:
+                        rho *= 10
+                    else:
+                        break
+
+                # Step 2.(b): Update alpha
+                adjacency_matrix_est, h = adjacency_matrix_new, h_new
+                alpha += rho * h
+
+                # Step 2.(c): Break away if h converges to 0
+                if h <= h_tol or rho >= rho_max:
                     break
 
-            # Step 2.(b): Update alpha
-            adjacency_matrix_est, h = adjacency_matrix_new, h_new
-            alpha += rho * h
+        else:
+            adjacency_matrix = torch.nn.Parameter(
+                self.backend.zeros(2 * n * n, requires_grad=True)
+            )
+            h = torch.inf
+            lbfgs = LBFGS(
+                [adjacency_matrix],
+                max_iter=5,
+                line_search_fn="strong_wolfe",
+            )
 
-            # Step 2.(c): Break away if h converges to 0
-            if h <= h_tol or rho >= rho_max:
-                break
+            def closure():
+                lbfgs.zero_grad()
+                loss = torch.abs(
+                    self._objective_function(adjacency_matrix, *tuple(self.args))
+                )
+                print("Loss - ", loss)
+                loss.backward(retain_graph=True)
+                return loss
+
+            for i in iteration:
+                # Step 2.(a): Solve for new values of W and h
+                if self.args[1] >= rho_max:
+                    break
+                print(f"\nNew Iteration no - {i+1}\n")
+                lbfgs.step(closure)
+                h_new, _ = self._constraint_grad(self._adj(adjacency_matrix))
+                print(f"\nh, h_new --> {h, h_new}\n")
+
+                if h == torch.inf or h_new > 0.25 * h:
+                    self.args[1] *= 10
+                else:
+                    print(f"Breaking loop - h, h_new --> {h, h_new}")
+                    break
+
+                # Step 2.(b): Update alpha
+                h = h_new
+                self.args[0] += self.args[1] * h  # alpha += rho*h
+
+                # Step 2.(c): Break away if h converges to 0
+                if h <= h_tol or self.args[1] >= rho_max:
+                    print(f"\nBreaking outer loop - h, rho -->  {h, self.args[1]}\n")
+                    break
+
+            adjacency_matrix_est = adjacency_matrix
 
         # Step 3: Convert doubled matrix to normal n*n and apply threshold to final weighted matrix
         adjacency_matrix_est = self._adj(adjacency_matrix_est)
