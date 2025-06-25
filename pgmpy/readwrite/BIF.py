@@ -24,8 +24,7 @@ try:
     )
 except ImportError as e:
     raise ImportError(
-        e.msg
-        + ". pyparsing is required for using read/write methods. Please install using: pip install pyparsing."
+        f"{e}. pyparsing is required for using read/write methods. Please install using: pip install pyparsing."
     ) from None
 
 from pgmpy.factors.discrete import TabularCPD
@@ -436,11 +435,11 @@ class BIFWriter(object):
     ---------
     >>> from pgmpy.readwrite import BIFWriter
     >>> from pgmpy.utils import get_example_model
-    >>> asia = get_example_model('asia')
+    >>> asia = get_example_model("asia")
     >>> writer = BIFWriter(asia)
     >>> writer
     <writer_BIF.BIFWriter at 0x7f05e5ea27b8>
-    >>> writer.write_bif('asia.bif')
+    >>> writer.write_bif("asia.bif")
     """
 
     def __init__(self, model, round_values=None):
@@ -576,7 +575,7 @@ $values
         Example
         -------
         >>> from pgmpy.readwrite import BIFReader, BIFWriter
-        >>> model = BIFReader('dog-problem.bif').get_model()
+        >>> model = BIFReader("dog-problem.bif").get_model()
         >>> writer = BIFWriter(model)
         >>> writer.get_variables()
         ['bowel-problem', 'family-out', 'hear-bark', 'light-on', 'dog-out']
@@ -595,7 +594,7 @@ $values
         Example
         -------
         >>> from pgmpy.readwrite import BIFReader, BIFWriter
-        >>> model = BIFReader('dog-problem.bif').get_model()
+        >>> model = BIFReader("dog-problem.bif").get_model()
         >>> writer = BIFWriter(model)
         >>> writer.get_states()
         {'bowel-problem': ['bowel-problem_0', 'bowel-problem_1'],
@@ -624,7 +623,7 @@ $values
         Example
         -------
         >>> from pgmpy.readwrite import BIFReader, BIFWriter
-        >>> model = BIFReader('dog-problem.bif').get_model()
+        >>> model = BIFReader("dog-problem.bif").get_model()
         >>> writer = BIFWriter(model)
         >>> writer.get_properties()
         {'bowel-problem': ['position = (335, 99)'],
@@ -654,7 +653,7 @@ $values
         Example
         -------
         >>> from pgmpy.readwrite import BIFReader, BIFWriter
-        >>> model = BIFReader('dog-problem.bif').get_model()
+        >>> model = BIFReader("dog-problem.bif").get_model()
         >>> writer = BIFWriter(model)
         >>> writer.get_parents()
         {'bowel-problem': [],
@@ -680,7 +679,7 @@ $values
         Example
         -------
         >>> from pgmpy.readwrite import BIFReader, BIFWriter
-        >>> model = BIFReader('dog-problem.bif').get_model()
+        >>> model = BIFReader("dog-problem.bif").get_model()
         >>> writer = BIFWriter(model)
         >>> writer.get_cpds()
         {'bowel-problem': array([ 0.01,  0.99]),
@@ -709,9 +708,9 @@ $values
         -------
         >>> from pgmpy.utils import get_example_model
         >>> from pgmpy.readwrite import BIFReader, BIFWriter
-        >>> asia = get_example_model('asia')
+        >>> asia = get_example_model("asia")
         >>> writer = BIFWriter(asia)
-        >>> writer.write_bif(filename='asia.bif')
+        >>> writer.write_bif(filename="asia.bif")
         """
         writer = self.__str__()
         with open(filename, "w") as fout:

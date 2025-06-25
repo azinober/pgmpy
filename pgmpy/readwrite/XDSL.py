@@ -6,6 +6,7 @@ from itertools import chain
 import networkx as nx
 
 from pgmpy.factors.discrete import TabularCPD
+from pgmpy.global_vars import logger
 from pgmpy.models import DiscreteBayesianNetwork
 from pgmpy.utils import compat_fns
 
@@ -13,6 +14,8 @@ from pgmpy.utils import compat_fns
 class XDSLReader(object):
     """
     Initializes the reader object for XDSL file formats[1] created through GeNIe[2].
+    Note that XDSLReader only supports cpt blocks from the XDSL file format; elements like
+    'deterministic' need to be aapropriately converted into 'cpt' elements before usage.
 
     Parameters
     ----------
@@ -45,6 +48,7 @@ class XDSLReader(object):
         else:
             raise ValueError("Must specify either path or string")
         self.network_name = self.network.attrib["id"]
+        self.cpt_elements = self.network.find("nodes").findall("cpt")
         self.variables = self.get_variables()
         self.variable_parents = self.get_parents()
         self.edge_list = self.get_edges()
@@ -61,8 +65,14 @@ class XDSLReader(object):
         >>> reader.get_variables()
         ['asia', 'tub', 'smoke', 'lung', 'either', 'xray', 'bronc', 'dysp']
         """
-        nodes = self.network.find("nodes")
-        variables = [variable.attrib["id"] for variable in nodes.findall("cpt")]
+        variables = [variable.attrib["id"] for variable in self.cpt_elements]
+        for var in variables:
+            if isinstance(var, str) and (" " in var):
+                raise ValueError(
+                    f"XDSLReader does not support models with node names"
+                    f" that contain whitespaces. Failed to process node: {var}"
+                )
+
         return variables
 
     def get_parents(self):
@@ -84,8 +94,7 @@ class XDSLReader(object):
         }
         """
         variable_parents = {}
-        nodes = self.network.find("nodes").findall("cpt")
-        for node in nodes:
+        for node in self.cpt_elements:
             parents = node.find("parents")
             if parents is not None:
                 variable_parents[node.attrib["id"]] = parents.text.split(" ")
@@ -137,9 +146,8 @@ class XDSLReader(object):
         dysp': ['Absent', 'Present']
         }
         """
-        nodes = self.network.find("nodes").findall("cpt")
         variable_states = {}
-        for cpt in nodes:
+        for cpt in self.cpt_elements:
             variable_states[cpt.attrib["id"]] = [
                 state.attrib["id"] for state in cpt.findall("state")
             ]
@@ -164,9 +172,7 @@ class XDSLReader(object):
         }
         """
         variable_CPD = {}
-        nodes = self.network.find("nodes").findall("cpt")
-        for cpt in nodes:
-
+        for cpt in self.cpt_elements:
             combined_prob = cpt.find("probabilities")
             num_states = len([state for state in cpt.findall("state")])
             cpd_arr = [[] for k in range(num_states)]
@@ -252,9 +258,9 @@ class XDSLWriter(object):
     ---------
     >>> from pgmpy.readwrite import XDSLWriter
     >>> from pgmpy.utils import get_example_model
-    >>> asia = get_example_model('asia')
+    >>> asia = get_example_model("asia")
     >>> writer = XDSLWriter(asia)
-    >>> writer.write_xdsl('asia.xdsl')
+    >>> writer.write_xdsl("asia.xdsl")
 
     Reference
     ---------
@@ -314,6 +320,11 @@ class XDSLWriter(object):
         nodes_elem = etree.SubElement(self.root, "nodes")
 
         for var in self.model.nodes:
+            if isinstance(var, str) and " " in var:
+                logger.warning(
+                    f" Node '{var}' contains whitespaces. "
+                    f"This could cause issues, especially when using pgmpy.readwrite.XDSLReader"
+                )
             variable_tag[var] = etree.SubElement(nodes_elem, "cpt", {"id": var})
 
         return variable_tag
@@ -362,7 +373,8 @@ class XDSLWriter(object):
             probs_elem = etree.SubElement(cpt_elem, "probabilities")
             values = cpd.get_values()
 
-            # Flatten in column-major order so that for each parent configuration the probabilities for all states are listed.
+            # Flatten in column-major order so that for each parent
+            #  configuration the probabilities for all states are listed.
             flat_values = compat_fns.ravel_f(values)
             probs_elem.text = " ".join("{:.16f}".format(float(x)) for x in flat_values)
 
@@ -426,9 +438,9 @@ class XDSLWriter(object):
         --------
         >>> from pgmpy.readwrite import XDSLWriter
         >>> from pgmpy.utils import get_example_model
-        >>> model = get_example_model('asia')
+        >>> model = get_example_model("asia")
         >>> writer = XDSLWriter(model)
-        >>> writer.write_xdsl('asia.xdsl')
+        >>> writer.write_xdsl("asia.xdsl")
         """
         xml_str = etree.tostring(self.root, encoding=self.encoding)
         parsed = md.parseString(xml_str)
