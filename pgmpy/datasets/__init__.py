@@ -14,6 +14,7 @@ from ._sachs import (  # noqa: F401
     SachsMixed,
 )
 from ._boston_housing import BostonHousing  # noqa: F401
+from ._cystic_fibrosis import CysticFibrosis  # noqa: F401
 from ._apple_watch_fitbit import AppleWatchFitbit  # noqa: F401
 from ._auto_mpg import AutoMpg  # noqa: F401
 from ._south_german_credit import SouthGermanCredit  # noqa: F401
