@@ -13,6 +13,8 @@ ALL_DATASETS = [
     "adult",
     "airfoil",
     "algeria_forest",
+    "apple_watch_fitbit",
+    "auto_mpg",
     "boston_housing",
     "south_german_credit",
     "pima_diabetes",
