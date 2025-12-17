@@ -13,6 +13,8 @@ from ._sachs import (  # noqa: F401
     SachsDiscrete,
     SachsMixed,
 )
+from ._boston_housing import BostonHousing  # noqa: F401
+from ._pima_diabetes import PimaDiabetes  # noqa: F401
 from ._seoul_bike import SeoulBike  # noqa: F401
 from ._wine_quality import (  # noqa: F401
     WineQualityWhite,

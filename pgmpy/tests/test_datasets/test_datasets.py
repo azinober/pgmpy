@@ -14,6 +14,7 @@ ALL_DATASETS = [
     "airfoil",
     "algeria_forest",
     "boston_housing",
+    "pima_diabetes",
     "galton_stature",
     "sachs_mixed",
     "sachs_continuous",
