@@ -21,6 +21,7 @@ ALL_DATASETS = [
     "sachs_continuous_logscale",
     "sachs_continuous_jittered_logscale",
     "sachs_continuous_jittered",
+    "seoul_bike",
     "wine_quality_red",
     "wine_quality_white",
     "wine_quality_red_white_mixed",
