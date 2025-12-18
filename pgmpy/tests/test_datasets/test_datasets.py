@@ -16,12 +16,13 @@ ALL_DATASETS = [
     "apple_watch_fitbit",
     "auto_mpg",
     "boston_housing",
+    "hitters",
     "pittsburgh_bridges",
     "residential_building",
     "credit_approval",
     "iq_brain_size",
     "contraceptive_method",
-    "myocardial_infarction_complications",
+    "myocardial_infarction",
     "htru2",
     "dry_bean",
     "cystic_fibrosis",
@@ -89,6 +90,9 @@ def test_load_dataset():
             assert isinstance(dataset.expert_knowledge, ExpertKnowledge)
         else:
             assert dataset.expert_knowledge is None
+
+        if DATASET_REGISTRY.get_dataset(dataset_name).tags["has_missing_data"]:
+            assert dataset.data.isna().any().any()
 
 
 @pytest.mark.skipif(
