@@ -13,6 +13,7 @@ from ._sachs import (  # noqa: F401
     SachsDiscrete,
     SachsMixed,
 )
+from ._lead import Lead  # noqa: F401
 from ._goldberg import Goldberg  # noqa: F401
 from ._hitters import Hitters  # noqa: F401
 from ._residential_building import ResidentialBuilding  # noqa: F401
