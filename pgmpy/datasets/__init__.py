@@ -13,6 +13,8 @@ from ._sachs import (  # noqa: F401
     SachsDiscrete,
     SachsMixed,
 )
+from ._residential_building import ResidentialBuilding  # noqa: F401
+from ._galton_stature import GaltonStature  # noqa: F401
 from ._iq_brain import IQBrainSize  # noqa: F401
 from ._contraceptive_method import ContraceptiveMethod  # noqa: F401
 from ._boston_housing import BostonHousing  # noqa: F401
