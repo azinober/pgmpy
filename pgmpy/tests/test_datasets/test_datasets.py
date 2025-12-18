@@ -16,6 +16,7 @@ ALL_DATASETS = [
     "apple_watch_fitbit",
     "auto_mpg",
     "boston_housing",
+    "goldberg",
     "hitters",
     "pittsburgh_bridges",
     "residential_building",
@@ -35,7 +36,7 @@ ALL_DATASETS = [
     "sachs_continuous_logscale",
     "sachs_continuous_jittered_logscale",
     "sachs_continuous_jittered",
-    "superconductivity_continuous",
+    "superconductivity",
     "yacht_hydrodynamics",
     "student_performance",
     "seoul_bike",
@@ -94,6 +95,21 @@ def test_load_dataset():
 
         if DATASET_REGISTRY.get_dataset(dataset_name).tags["has_missing_data"]:
             assert dataset.data.isna().any().any()
+
+
+@pytest.mark.skipif(
+    not _check_soft_dependencies("requests", severity="none"),
+    reason="test only if requests is installed",
+)
+def test_load_covariance_dataset():
+    dataset = load_dataset("goldberg")
+    assert dataset.name == "goldberg"
+    assert dataset.data.shape == (
+        dataset.tags["n_samples"],
+        dataset.tags["n_variables"],
+    )
+    assert isinstance(dataset.data, pd.DataFrame)
+    assert isinstance(dataset.tags, dict)
 
 
 @pytest.mark.skipif(
