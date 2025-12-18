@@ -16,6 +16,7 @@ ALL_DATASETS = [
     "apple_watch_fitbit",
     "auto_mpg",
     "boston_housing",
+    "spartina",
     "goldberg",
     "hitters",
     "pittsburgh_bridges",
@@ -102,14 +103,15 @@ def test_load_dataset():
     reason="test only if requests is installed",
 )
 def test_load_covariance_dataset():
-    dataset = load_dataset("goldberg")
-    assert dataset.name == "goldberg"
-    assert dataset.data.shape == (
-        dataset.tags["n_samples"],
-        dataset.tags["n_variables"],
-    )
-    assert isinstance(dataset.data, pd.DataFrame)
-    assert isinstance(dataset.tags, dict)
+    for name in ["goldberg", "spartina"]:
+        dataset = load_dataset(name)
+        assert dataset.name == name
+        assert dataset.data.shape == (
+            dataset.tags["n_samples"],
+            dataset.tags["n_variables"],
+        )
+        assert isinstance(dataset.data, pd.DataFrame)
+        assert isinstance(dataset.tags, dict)
 
 
 @pytest.mark.skipif(
