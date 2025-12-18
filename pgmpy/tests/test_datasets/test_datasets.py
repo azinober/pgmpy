@@ -16,6 +16,7 @@ ALL_DATASETS = [
     "apple_watch_fitbit",
     "auto_mpg",
     "boston_housing",
+    "iq_brain_size",
     "contraceptive_method",
     "myocardial_infarction_complications",
     "htru2",
