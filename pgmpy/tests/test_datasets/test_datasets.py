@@ -45,6 +45,7 @@ ALL_DATASETS = [
     "yacht_hydrodynamics",
     "student_performance",
     "seoul_bike",
+    "uscrime",
     "wine_quality_red",
     "wine_quality_white",
     "wine_quality_red_white_mixed",
