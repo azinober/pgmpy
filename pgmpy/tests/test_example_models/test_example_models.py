@@ -15,6 +15,8 @@ DISCRETE_MODELS = [
     "alarm",
     "cancer",
     "earthquake",
+    "pathfinder",
+    "pigs",
     "water",
     "munin",
     "munin1",
