@@ -15,6 +15,7 @@ DISCRETE_MODELS = [
     "alarm",
     "cancer",
     "earthquake",
+    "child",
     "barley",
     "sachs",
     "mildew",
