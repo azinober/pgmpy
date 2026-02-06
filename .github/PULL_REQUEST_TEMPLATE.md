@@ -2,6 +2,7 @@
 Please review the [guidelines for contributing](CONTRIBUTING.md) to this repository.
 
 - [ ] Make sure you are requesting to **pull a topic/feature/bugfix branch** (right side) against our **dev branch** (left side).
+- [ ] Have you followed all the steps from our [Contributing Guide](https://github.com/pgmpy/pgmpy/blob/dev/Contributing.md)
 - [ ] Are all the GitHub Actions checks passing? If not, you will need to make changes to fix them. You can reference actions logs for the failing check to identify the issue.
 
 Did you use a Large language model (LLM) to generate the PR (or parts of it)? If yes, please go through this checklist as well: 
