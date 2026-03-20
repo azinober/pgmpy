@@ -15,6 +15,7 @@ pgmpy/estimators/MmhcEstimator.py
 pgmpy/estimators/EM.py
 pgmpy/estimators/BayesianEstimator.py
 pgmpy/estimators/ExhaustiveSearch.py
+pgmpy/independencies/Independencies.py
 pgmpy/inference/ApproxInference.py
 pgmpy/metrics/shd.py
 pgmpy/models/ClusterGraph.py
