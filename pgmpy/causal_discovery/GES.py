@@ -6,8 +6,8 @@ import numpy as np
 import pandas as pd
 
 from pgmpy.base import DAG
+from pgmpy.causal_discovery import ExpertKnowledge
 from pgmpy.causal_discovery._base import _BaseCausalDiscovery, _ScoreMixin
-from pgmpy.estimators import ExpertKnowledge
 from pgmpy.estimators.StructureScore import StructureScore, get_scoring_method
 
 
@@ -100,11 +100,11 @@ class GES(_ScoreMixin, _BaseCausalDiscovery):
 
     Use expert knowledge to constrain the search:
 
-    >>> from pgmpy.estimators import ExpertKnowledge
+    >>> from pgmpy.causal_discovery import ExpertKnowledge
     >>> expert = ExpertKnowledge(forbidden_edges=[("HISTORY", "CVP")])
     >>> ges = GES(scoring_method="bic-d", expert_knowledge=expert)
     >>> ges.fit(df)  # doctest: +ELLIPSIS
-    GES(expert_knowledge=<pgmpy.estimators.ExpertKnowledge.ExpertKnowledge object at 0x...>,
+    GES(expert_knowledge=<pgmpy.causal_discovery.ExpertKnowledge.ExpertKnowledge object at 0x...>,
         scoring_method='bic-d')
 
     References

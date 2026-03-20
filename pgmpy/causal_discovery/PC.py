@@ -5,10 +5,9 @@ import networkx as nx
 import pandas as pd
 
 from pgmpy.base import PDAG, UndirectedGraph
-from pgmpy.causal_discovery import _ConstraintMixin
-from pgmpy.causal_discovery._base import _BaseCausalDiscovery
+from pgmpy.causal_discovery import ExpertKnowledge
+from pgmpy.causal_discovery._base import _BaseCausalDiscovery, _ConstraintMixin
 from pgmpy.ci_tests import get_ci_test
-from pgmpy.estimators import ExpertKnowledge
 
 
 class PC(_ConstraintMixin, _BaseCausalDiscovery):
