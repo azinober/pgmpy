@@ -21,3 +21,4 @@ pgmpy/estimators/ExhaustiveSearch.py
 pgmpy/models/ClusterGraph.py
 pgmpy/inference/ApproxInference.py
 pgmpy/models/FactorGraph.py
+pgmpy/metrics/shd.py
