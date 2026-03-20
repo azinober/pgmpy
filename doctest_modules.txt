@@ -3,6 +3,7 @@
 # Example:
 # pgmpy/base/DAG.py
 pgmpy/base/ADMG.py
+pgmpy/base/DAG.py
 pgmpy/inference/ExactInference.py
 pgmpy/factors/FactorSet.py
 pgmpy/causal_discovery/GES.py
