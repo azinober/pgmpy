@@ -38,3 +38,4 @@ pgmpy/utils/mathext.py
 pgmpy/factors/discrete/CPD.py
 pgmpy/inference/CausalInference.py
 pgmpy/models/DynamicBayesianNetwork.py
+pgmpy/factors/continuous/LinearGaussianCPD.py
